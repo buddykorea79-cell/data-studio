@@ -1,0 +1,1724 @@
+import { useState, useRef, useCallback, useMemo } from "react";
+import * as XLSX from "xlsx";
+import { BarChart, Bar, LineChart, Line, ScatterChart, Scatter, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
+
+const C = {
+  bg: "var(--color-background-primary)",
+  bgS: "var(--color-background-secondary)",
+  bgT: "var(--color-background-tertiary)",
+  tx: "var(--color-text-primary)",
+  txS: "var(--color-text-secondary)",
+  txT: "var(--color-text-tertiary)",
+  bd: "var(--color-border-tertiary)",
+  bdS: "var(--color-border-secondary)",
+  info: "var(--color-background-info)",
+  infoTx: "var(--color-text-info)",
+  success: "var(--color-background-success)",
+  successTx: "var(--color-text-success)",
+  warn: "var(--color-background-warning)",
+  warnTx: "var(--color-text-warning)",
+  danger: "var(--color-background-danger)",
+  dangerTx: "var(--color-text-danger)",
+};
+
+// ── palette for type badges ──────────────────────────────────────────────────
+const TYPE_CLR = {
+  number:   { bg: "#E6F1FB", tx: "#0C447C" },
+  category: { bg: "#EEEDFE", tx: "#3C3489" },
+  text:     { bg: "#F1EFE8", tx: "#444441" },
+  date:     { bg: "#EAF3DE", tx: "#27500A" },
+  empty:    { bg: "#FAEEDA", tx: "#633806" },
+};
+const ALL_TYPES = ["number","category","text","date","empty"];
+
+// ── core helpers ─────────────────────────────────────────────────────────────
+function detectType(values) {
+  const nn = values.filter((v) => v !== null && v !== undefined && v !== "");
+  if (!nn.length) return "empty";
+  if (nn.filter((v) => !isNaN(Number(v)) && v !== "").length / nn.length > 0.85) return "number";
+  if (nn.filter((v) => /^\d{4}[-/]\d{2}[-/]\d{2}|^\d{2}[-/]\d{2}[-/]\d{4}/.test(String(v))).length / nn.length > 0.7) return "date";
+  const uniq = new Set(nn.map(String));
+  if (uniq.size <= Math.min(20, nn.length * 0.3)) return "category";
+  return "text";
+}
+
+function computeStats(values, type) {
+  const nn = values.filter((v) => v !== null && v !== undefined && v !== "");
+  const base = { count: values.length, nullCount: values.length - nn.length, unique: new Set(nn.map(String)).size };
+  if (type === "number") {
+    const nums = nn.map(Number).filter((n) => !isNaN(n));
+    if (!nums.length) return base;
+    const sorted = [...nums].sort((a, b) => a - b);
+    const sum = nums.reduce((a, b) => a + b, 0);
+    const mean = sum / nums.length;
+    return { ...base, min: sorted[0], max: sorted[sorted.length - 1], mean: +mean.toFixed(4), median: sorted[Math.floor(sorted.length / 2)], std: +Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length).toFixed(4), sum: +sum.toFixed(4) };
+  }
+  if (type === "category") {
+    const freq = {};
+    nn.forEach((v) => { freq[String(v)] = (freq[String(v)] || 0) + 1; });
+    return { ...base, topValues: Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5) };
+  }
+  return base;
+}
+
+function buildColMeta(rows, columns) {
+  return columns.map((col) => {
+    const values = rows.map((r) => r[col]);
+    const type = detectType(values);
+    return { name: col, type, stats: computeStats(values, type) };
+  });
+}
+
+function parseFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    const ext = file.name.split(".").pop().toLowerCase();
+    reader.onload = (e) => {
+      try {
+        let allRows = [];
+        let rawLines = [];
+        if (ext === "csv") {
+          const text = typeof e.target.result === "string" ? e.target.result : new TextDecoder().decode(e.target.result);
+          rawLines = text.split(/\r?\n/);
+          const lines = rawLines.filter((l) => l.trim());
+          const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+          allRows = lines.slice(1).map((line) => {
+            const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+            const row = {};
+            headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
+            return row;
+          });
+        } else {
+          const wb = XLSX.read(e.target.result, { type: "array" });
+          allRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", header: 1 });
+          rawLines = allRows.map((r) => r.join(","));
+          const headers = allRows[0].map(String);
+          allRows = allRows.slice(1).map((row) => {
+            const obj = {};
+            headers.forEach((h, i) => { obj[h] = row[i] ?? ""; });
+            return obj;
+          });
+        }
+        const columns = Object.keys(allRows[0] || {});
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name,
+          rawLines,
+          rows: allRows,
+          columns,
+          colMeta: buildColMeta(allRows, columns),
+          rowCount: allRows.length,
+        });
+      } catch (err) { reject(err); }
+    };
+    if (ext === "csv") reader.readAsText(file);
+    else reader.readAsArrayBuffer(file);
+  });
+}
+
+function downloadCSV(dataset) {
+  const header = dataset.columns.join(",");
+  const body = dataset.rows.map((r) => dataset.columns.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([header + "\n" + body], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `${dataset.name.replace(/\.[^.]+$/, "")}_export.csv`; a.click();
+}
+
+// ── join / union ─────────────────────────────────────────────────────────────
+function performJoin(leftDs, rightDs, leftKey, rightKey, joinType) {
+  const rightMap = {};
+  rightDs.rows.forEach((row) => { const k = String(row[rightKey] ?? ""); if (!rightMap[k]) rightMap[k] = []; rightMap[k].push(row); });
+  const rightOnlyCols = rightDs.columns.filter((c) => c !== rightKey);
+  const rows = []; const matchedRightKeys = new Set();
+  leftDs.rows.forEach((lRow) => {
+    const k = String(lRow[leftKey] ?? ""); const matches = rightMap[k] || [];
+    if (matches.length) {
+      matches.forEach((rRow) => { matchedRightKeys.add(k); const merged = { ...lRow }; rightOnlyCols.forEach((c) => { const tc = leftDs.columns.includes(c) ? `${rightDs.name.replace(/\.[^.]+$/, "")}.${c}` : c; merged[tc] = rRow[c]; }); rows.push(merged); });
+    } else if (joinType === "left" || joinType === "outer") {
+      const merged = { ...lRow }; rightOnlyCols.forEach((c) => { const tc = leftDs.columns.includes(c) ? `${rightDs.name.replace(/\.[^.]+$/, "")}.${c}` : c; merged[tc] = null; }); rows.push(merged);
+    }
+  });
+  if (joinType === "right" || joinType === "outer") {
+    rightDs.rows.forEach((rRow) => { const k = String(rRow[rightKey] ?? ""); if (!matchedRightKeys.has(k)) { const merged = {}; leftDs.columns.forEach((c) => { merged[c] = null; }); rightOnlyCols.forEach((c) => { const tc = leftDs.columns.includes(c) ? `${rightDs.name.replace(/\.[^.]+$/, "")}.${c}` : c; merged[tc] = rRow[c]; }); merged[leftKey] = rRow[rightKey]; rows.push(merged); } });
+  }
+  const finalCols = Object.keys(rows[0] || {});
+  return { id: crypto.randomUUID(), name: "merge_result", rows, columns: finalCols, colMeta: buildColMeta(rows, finalCols), rowCount: rows.length, isMerged: true };
+}
+
+function performUnion(datasets, mode) {
+  const allCols = mode === "strict" ? datasets[0].columns.filter((c) => datasets.every((ds) => ds.columns.includes(c))) : [...new Set(datasets.flatMap((ds) => ds.columns))];
+  const rows = datasets.flatMap((ds) => ds.rows.map((row) => { const r = { _source: ds.name }; allCols.forEach((c) => { r[c] = row[c] ?? null; }); return r; }));
+  const finalCols = ["_source", ...allCols];
+  return { id: crypto.randomUUID(), name: "union_result", rows, columns: finalCols, colMeta: buildColMeta(rows, finalCols), rowCount: rows.length, isMerged: true };
+}
+
+// ── shared UI atoms ──────────────────────────────────────────────────────────
+function TypeBadge({ type }) {
+  const clr = TYPE_CLR[type] || TYPE_CLR.text;
+  return <span style={{ fontSize: 11, fontWeight: 500, padding: "2px 7px", borderRadius: 4, background: clr.bg, color: clr.tx, fontFamily: "var(--font-mono)" }}>{type}</span>;
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div style={{ background: C.bgS, borderRadius: "var(--border-radius-md)", padding: "10px 14px", minWidth: 80 }}>
+      <div style={{ fontSize: 11, color: C.txS, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)" }}>{value}</div>
+    </div>
+  );
+}
+
+function Btn({ onClick, children, variant = "default", disabled = false, small = false }) {
+  const styles = {
+    default: { bg: "transparent", color: C.txS, border: `0.5px solid ${C.bdS}` },
+    primary: { bg: "#185FA5", color: "#fff", border: "none" },
+    success: { bg: "#0F6E56", color: "#fff", border: "none" },
+    danger:  { bg: "transparent", color: "#A32D2D", border: "0.5px solid #F09595" },
+    warn:    { bg: "#BA7517", color: "#fff", border: "none" },
+  };
+  const s = styles[variant] || styles.default;
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ fontSize: small ? 11 : 13, padding: small ? "3px 8px" : "7px 16px", cursor: disabled ? "not-allowed" : "pointer", borderRadius: "var(--border-radius-md)", background: s.bg, color: s.color, border: s.border, fontWeight: 500, opacity: disabled ? 0.45 : 1, whiteSpace: "nowrap" }}>
+      {children}
+    </button>
+  );
+}
+
+function DataTable({ rows, columns }) {
+  const [page, setPage] = useState(0);
+  const PG = 10; const total = Math.ceil(rows.length / PG);
+  return (
+    <div>
+      <div style={{ overflowX: "auto", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bd}` }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: C.bgS }}>
+              <th style={{ padding: "8px 10px", textAlign: "left", color: C.txS, fontWeight: 500, fontSize: 12, borderBottom: `0.5px solid ${C.bd}`, whiteSpace: "nowrap" }}>#</th>
+              {columns.map((col) => <th key={col} style={{ padding: "8px 10px", textAlign: "left", color: C.txS, fontWeight: 500, fontSize: 12, borderBottom: `0.5px solid ${C.bd}`, whiteSpace: "nowrap" }}>{col}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(page * PG, (page + 1) * PG).map((row, i) => (
+              <tr key={i} style={{ borderBottom: `0.5px solid ${C.bd}`, background: i % 2 === 0 ? C.bg : C.bgS }}>
+                <td style={{ padding: "6px 10px", color: C.txT, fontSize: 12, fontFamily: "var(--font-mono)" }}>{page * PG + i + 1}</td>
+                {columns.map((col) => {
+                  const v = row[col];
+                  const isNull = v === null || v === undefined;
+                  return <td key={col} style={{ padding: "6px 10px", color: isNull ? C.txT : C.tx, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: isNull ? "italic" : "normal", fontSize: 13 }}>{isNull ? "null" : String(v)}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {total > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+          <span style={{ fontSize: 12, color: C.txS }}>{page + 1} / {total}</span>
+          <Btn small onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>이전</Btn>
+          <Btn small onClick={() => setPage(Math.min(total - 1, page + 1))} disabled={page === total - 1}>다음</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FileCard (파일 목록 탭) ────────────────────────────────────────────────────
+function FileCard({ dataset, onRemove, isMergeResult }) {
+  const [tab, setTab] = useState("preview");
+  const [expandedCol, setExpandedCol] = useState(null);
+  const TABS = [{ id: "preview", label: "미리보기" }, { id: "schema", label: "스키마" }, { id: "summary", label: "요약" }];
+  return (
+    <div style={{ background: C.bg, border: `0.5px solid ${isMergeResult ? "#185FA5" : C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", borderBottom: `0.5px solid ${C.bd}`, background: isMergeResult ? "#E6F1FB" : C.bgS }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isMergeResult && <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#185FA5", color: "#fff", fontWeight: 500 }}>결과</span>}
+          <span style={{ fontSize: 14, fontWeight: 500, color: C.tx }}>{dataset.name}</span>
+          <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: C.info, color: C.infoTx }}>{dataset.rowCount.toLocaleString()}행 × {dataset.columns.length}열</span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn small onClick={() => downloadCSV(dataset)}>CSV 다운로드</Btn>
+          <Btn small onClick={onRemove}>제거</Btn>
+        </div>
+      </div>
+      <div style={{ display: "flex", borderBottom: `0.5px solid ${C.bd}`, padding: "0 18px" }}>
+        {TABS.map((t) => <button key={t.id} onClick={() => setTab(t.id)} style={{ fontSize: 13, padding: "9px 13px", cursor: "pointer", background: "transparent", border: "none", borderBottom: tab === t.id ? `2px solid ${C.infoTx}` : "2px solid transparent", color: tab === t.id ? C.infoTx : C.txS, fontWeight: tab === t.id ? 500 : 400, marginBottom: -0.5 }}>{t.label}</button>)}
+      </div>
+      <div style={{ padding: 18 }}>
+        {tab === "preview" && <DataTable rows={dataset.rows} columns={dataset.columns} />}
+        {tab === "schema" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {dataset.colMeta.map((col) => (
+              <div key={col.name} style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-md)", overflow: "hidden" }}>
+                <div onClick={() => setExpandedCol(expandedCol === col.name ? null : col.name)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 14px", cursor: "pointer", background: expandedCol === col.name ? C.bgS : C.bg }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 13, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)" }}>{col.name}</span><TypeBadge type={col.type} /></div>
+                  <span style={{ fontSize: 12, color: C.txS }}>결측 {col.stats.nullCount} · 고유 {col.stats.unique} {expandedCol === col.name ? "▲" : "▼"}</span>
+                </div>
+                {expandedCol === col.name && (
+                  <div style={{ padding: "12px 14px", borderTop: `0.5px solid ${C.bd}` }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {[["행 수", col.stats.count], ["고유값", col.stats.unique], ["결측값", col.stats.nullCount], ...(col.type === "number" ? [["최솟값", col.stats.min], ["최댓값", col.stats.max], ["평균", col.stats.mean], ["중앙값", col.stats.median]] : [])].map(([l, v]) => <StatCard key={l} label={l} value={v} />)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "summary" && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 20 }}>
+              <StatCard label="총 행 수" value={dataset.rowCount.toLocaleString()} />
+              <StatCard label="총 열 수" value={dataset.columns.length} />
+              <StatCard label="숫자형 열" value={dataset.colMeta.filter((c) => c.type === "number").length} />
+              <StatCard label="범주형 열" value={dataset.colMeta.filter((c) => c.type === "category").length} />
+              <StatCard label="텍스트 열" value={dataset.colMeta.filter((c) => c.type === "text").length} />
+            </div>
+            <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-md)", overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: C.bgS }}>{["컬럼","평균","중앙값","최솟값","최댓값","표준편차","합계"].map((h) => <th key={h} style={{ padding: "7px 12px", textAlign: h === "컬럼" ? "left" : "right", color: C.txS, fontWeight: 500, borderBottom: `0.5px solid ${C.bd}` }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {dataset.colMeta.filter((c) => c.type === "number").map((col, i) => (
+                    <tr key={col.name} style={{ borderBottom: `0.5px solid ${C.bd}`, background: i % 2 === 0 ? C.bg : C.bgS }}>
+                      <td style={{ padding: "7px 12px", fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)", fontSize: 12 }}>{col.name}</td>
+                      {[col.stats.mean, col.stats.median, col.stats.min, col.stats.max, col.stats.std, col.stats.sum].map((v, j) => <td key={j} style={{ padding: "7px 12px", textAlign: "right", color: C.tx, fontFamily: "var(--font-mono)" }}>{v !== undefined ? Number(v).toLocaleString() : "—"}</td>)}
+                    </tr>
+                  ))}
+                  {!dataset.colMeta.filter((c) => c.type === "number").length && <tr><td colSpan={7} style={{ padding: "16px", textAlign: "center", color: C.txS }}>숫자형 컬럼 없음</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── OverviewTab ───────────────────────────────────────────────────────────────
+function OverviewTab({ datasets }) {
+  const totR = datasets.reduce((a, d) => a + d.rowCount, 0);
+  const totC = datasets.reduce((a, d) => a + d.columns.length, 0);
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 24 }}>
+        {[["총 파일 수", datasets.length, C.info, C.infoTx], ["총 행 수", totR.toLocaleString(), C.bgS, C.tx], ["총 열 수", totC, C.bgS, C.tx], ["숫자형 컬럼", datasets.reduce((a, d) => a + d.colMeta.filter((c) => c.type === "number").length, 0), C.bgS, C.tx], ["범주형 컬럼", datasets.reduce((a, d) => a + d.colMeta.filter((c) => c.type === "category").length, 0), C.bgS, C.tx]].map(([l, v, bg, clr]) => (
+          <div key={l} style={{ background: bg, borderRadius: "var(--border-radius-md)", padding: "12px 16px" }}>
+            <div style={{ fontSize: 11, color: C.txS, marginBottom: 5 }}>{l}</div>
+            <div style={{ fontSize: 20, fontWeight: 500, color: clr, fontFamily: "var(--font-mono)" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 13, color: C.txS, fontWeight: 500, marginBottom: 10 }}>파일별 개요</div>
+      <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-md)", overflow: "hidden", marginBottom: 24 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: C.bgS }}>{["파일명","행 수","열 수","숫자형","범주형","텍스트형","날짜형","결측합계"].map((h) => <th key={h} style={{ padding: "9px 12px", textAlign: h === "파일명" ? "left" : "right", color: C.txS, fontWeight: 500, fontSize: 12, borderBottom: `0.5px solid ${C.bd}`, whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {datasets.map((ds, i) => {
+              const nullT = ds.colMeta.reduce((a, c) => a + (c.stats.nullCount || 0), 0);
+              const nullP = ds.rowCount > 0 ? ((nullT / (ds.rowCount * ds.columns.length)) * 100).toFixed(1) : 0;
+              return (
+                <tr key={ds.id} style={{ borderBottom: `0.5px solid ${C.bd}`, background: i % 2 === 0 ? C.bg : C.bgS }}>
+                  <td style={{ padding: "9px 12px", color: C.tx, fontWeight: 500 }}>{ds.name}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12 }}>{ds.rowCount.toLocaleString()}</td>
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 12 }}>{ds.columns.length}</td>
+                  {[["number","#E6F1FB","#0C447C"],["category","#EEEDFE","#3C3489"],["text","#F1EFE8","#444441"],["date","#EAF3DE","#27500A"]].map(([type, bg, clr]) => (
+                    <td key={type} style={{ padding: "9px 12px", textAlign: "right" }}><span style={{ fontSize: 12, color: clr, background: bg, padding: "1px 7px", borderRadius: 4, fontFamily: "var(--font-mono)" }}>{ds.colMeta.filter((c) => c.type === type).length}</span></td>
+                  ))}
+                  <td style={{ padding: "9px 12px", textAlign: "right", fontSize: 12, fontFamily: "var(--font-mono)", color: nullT > 0 ? "#A32D2D" : C.txS }}>{nullT.toLocaleString()} <span style={{ fontSize: 11, color: C.txT }}>({nullP}%)</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {datasets.map((ds) => {
+        const numCols = ds.colMeta.filter((c) => c.type === "number");
+        if (!numCols.length) return null;
+        return (
+          <div key={ds.id} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: C.txS, marginBottom: 8 }}><span style={{ color: C.tx }}>{ds.name}</span> — 숫자형 통계</div>
+            <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-md)", overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: C.bgS }}>{["컬럼","평균","중앙값","최솟값","최댓값","표준편차","결측"].map((h) => <th key={h} style={{ padding: "7px 12px", textAlign: h === "컬럼" ? "left" : "right", color: C.txS, fontWeight: 500, borderBottom: `0.5px solid ${C.bd}` }}>{h}</th>)}</tr></thead>
+                <tbody>{numCols.map((col, i) => <tr key={col.name} style={{ borderBottom: `0.5px solid ${C.bd}`, background: i % 2 === 0 ? C.bg : C.bgS }}><td style={{ padding: "7px 12px", fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)" }}>{col.name}</td>{[col.stats.mean, col.stats.median, col.stats.min, col.stats.max, col.stats.std].map((v, j) => <td key={j} style={{ padding: "7px 12px", textAlign: "right", fontFamily: "var(--font-mono)", color: C.tx }}>{v !== undefined ? Number(v).toLocaleString() : "—"}</td>)}<td style={{ padding: "7px 12px", textAlign: "right", fontFamily: "var(--font-mono)", color: col.stats.nullCount > 0 ? "#A32D2D" : C.txS }}>{col.stats.nullCount}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── PreprocessTab ─────────────────────────────────────────────────────────────
+function PreprocessTab({ datasets, onUpdate }) {
+  const [selId, setSelId] = useState(() => datasets[0]?.id ?? "");
+  const ds = datasets.find((d) => d.id === selId);
+
+  // per-column overrides: { colName: { type?, nullValues:string[], rename?:string } }
+  const [colOverrides, setColOverrides] = useState({});
+  // start-row offset (0-based skip count)
+  const [skipRows, setSkipRows] = useState(0);
+  // fill-null strategy per column: "none"|"mean"|"median"|"mode"|"custom"
+  const [fillStrategy, setFillStrategy] = useState({});
+  const [fillCustom, setFillCustom] = useState({});
+  // drop-duplicate columns
+  const [dedupCols, setDedupCols] = useState([]);
+  // string ops per column: trim, lowercase, uppercase
+  const [strOps, setStrOps] = useState({});
+  // applied log
+  const [log, setLog] = useState([]);
+
+  // Reset when dataset changes
+  const prevIdRef = useRef(selId);
+  if (prevIdRef.current !== selId) { prevIdRef.current = selId; setColOverrides({}); setSkipRows(0); setFillStrategy({}); setFillCustom({}); setDedupCols([]); setStrOps([]); setLog([]); }
+
+  if (!ds) return <div style={{ padding: "40px", textAlign: "center", color: C.txT }}>파일을 먼저 업로드해 주세요.</div>;
+
+  // helpers
+  const override = (col, key, val) => setColOverrides((prev) => ({ ...prev, [col]: { ...(prev[col] || {}), [key]: val } }));
+  const toggleDedupCol = (col) => setDedupCols((p) => p.includes(col) ? p.filter((c) => c !== col) : [...p, col]);
+  const toggleStrOp = (col, op) => setStrOps((p) => { const cur = p[col] || []; return { ...p, [col]: cur.includes(op) ? cur.filter((o) => o !== op) : [...cur, op] }; });
+
+  const previewRows = useMemo(() => ds.rows.slice(skipRows), [ds.rows, skipRows]);
+
+  function applyAll() {
+    let rows = ds.rows.slice(skipRows);
+    const ops = [];
+
+    // 1. rename + null-value replace
+    const renames = {};
+    Object.entries(colOverrides).forEach(([col, ov]) => {
+      if (ov.nullValues?.length) {
+        const nullSet = new Set(ov.nullValues.map((v) => v.trim()).filter(Boolean));
+        rows = rows.map((r) => ({ ...r, [col]: nullSet.has(String(r[col] ?? "")) ? null : r[col] }));
+        ops.push(`"${col}": ${[...nullSet].join(",")} → null`);
+      }
+      if (ov.rename && ov.rename !== col) { renames[col] = ov.rename; }
+    });
+
+    // 2. string ops
+    Object.entries(strOps).forEach(([col, ops_]) => {
+      ops_.forEach((op) => {
+        rows = rows.map((r) => {
+          let v = String(r[col] ?? "");
+          if (op === "trim") v = v.trim();
+          if (op === "lower") v = v.toLowerCase();
+          if (op === "upper") v = v.toUpperCase();
+          return { ...r, [col]: v };
+        });
+        ops.push(`"${col}": ${op}`);
+      });
+    });
+
+    // 3. fill null
+    Object.entries(fillStrategy).forEach(([col, strategy]) => {
+      if (strategy === "none") return;
+      const vals = rows.map((r) => r[col]).filter((v) => v !== null && v !== undefined && v !== "");
+      let fillVal = null;
+      if (strategy === "mean") { const nums = vals.map(Number).filter((n) => !isNaN(n)); fillVal = nums.length ? +(nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(4) : null; }
+      else if (strategy === "median") { const nums = [...vals.map(Number).filter((n) => !isNaN(n))].sort((a, b) => a - b); fillVal = nums.length ? nums[Math.floor(nums.length / 2)] : null; }
+      else if (strategy === "mode") { const freq = {}; vals.forEach((v) => { freq[v] = (freq[v] || 0) + 1; }); fillVal = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null; }
+      else if (strategy === "custom") { fillVal = fillCustom[col] ?? ""; }
+      if (fillVal !== null) { rows = rows.map((r) => ({ ...r, [col]: (r[col] === null || r[col] === undefined || r[col] === "") ? fillVal : r[col] })); ops.push(`"${col}": 결측 → ${fillVal} (${strategy})`); }
+    });
+
+    // 4. dedup
+    if (dedupCols.length) {
+      const seen = new Set();
+      const before = rows.length;
+      rows = rows.filter((r) => { const k = dedupCols.map((c) => String(r[c] ?? "")).join("||"); if (seen.has(k)) return false; seen.add(k); return true; });
+      ops.push(`중복 제거 (${dedupCols.join(",")}): ${before - rows.length}행 삭제`);
+    }
+
+    // 5. rename columns
+    if (Object.keys(renames).length) {
+      rows = rows.map((r) => { const nr = {}; Object.entries(r).forEach(([k, v]) => { nr[renames[k] || k] = v; }); return nr; });
+      Object.entries(renames).forEach(([o, n]) => ops.push(`컬럼 이름: "${o}" → "${n}"`));
+    }
+
+    // 6. type casting
+    Object.entries(colOverrides).forEach(([col, ov]) => {
+      const targetCol = renames[col] || col;
+      if (ov.type) {
+        rows = rows.map((r) => {
+          let v = r[targetCol];
+          if (v === null || v === undefined || v === "") return r;
+          if (ov.type === "number") v = isNaN(Number(v)) ? null : Number(v);
+          else if (ov.type === "text") v = String(v);
+          else if (ov.type === "date") v = String(v);
+          else v = String(v);
+          return { ...r, [targetCol]: v };
+        });
+        ops.push(`"${targetCol}": 타입 → ${ov.type}`);
+      }
+    });
+
+    if (skipRows > 0) ops.unshift(`시작 행 ${skipRows}개 스킵`);
+
+    const columns = Object.keys(rows[0] || {});
+    const updated = { ...ds, rows, columns, colMeta: buildColMeta(rows, columns), rowCount: rows.length };
+    onUpdate(updated);
+    setLog((p) => [...p, ...ops.map((o) => ({ ts: new Date().toLocaleTimeString(), msg: o }))]);
+  }
+
+  const FILL_OPTIONS = [{ id: "none", label: "그대로" }, { id: "mean", label: "평균값" }, { id: "median", label: "중앙값" }, { id: "mode", label: "최빈값" }, { id: "custom", label: "직접 입력" }];
+
+  return (
+    <div>
+      {/* 파일 선택 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+        <span style={{ fontSize: 13, color: C.txS, whiteSpace: "nowrap" }}>전처리 대상 파일</span>
+        <select value={selId} onChange={(e) => setSelId(e.target.value)} style={{ fontSize: 13, padding: "6px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx, flex: 1 }}>
+          {datasets.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.rowCount}행)</option>)}
+        </select>
+      </div>
+
+      {/* ① 시작 행 지정 */}
+      <Section title="① 시작 행 지정" desc="헤더 위에 불필요한 행이 있을 때 스킵할 행 수를 지정합니다">
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 13, color: C.txS }}>스킵할 행 수</span>
+            <input type="number" min={0} max={Math.max(0, ds.rowCount - 1)} value={skipRows} onChange={(e) => setSkipRows(Math.max(0, +e.target.value))}
+              style={{ width: 72, fontSize: 13, padding: "5px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }} />
+            <span style={{ fontSize: 12, color: C.txS }}>적용 후 {Math.max(0, ds.rowCount - skipRows).toLocaleString()}행 남음</span>
+          </div>
+        </div>
+        {skipRows > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, color: C.txS, marginBottom: 6 }}>미리보기 (처음 5행)</div>
+            <div style={{ overflowX: "auto", border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-md)" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: C.bgS }}>{ds.columns.map((c) => <th key={c} style={{ padding: "6px 10px", textAlign: "left", color: C.txS, fontWeight: 500, borderBottom: `0.5px solid ${C.bd}`, whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>
+                <tbody>{previewRows.slice(0, 5).map((row, i) => <tr key={i} style={{ borderBottom: `0.5px solid ${C.bd}` }}>{ds.columns.map((c) => <td key={c} style={{ padding: "5px 10px", color: C.tx, fontSize: 12 }}>{String(row[c] ?? "")}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Section>
+
+      {/* ② 컬럼 타입 변경 & 이름 변경 */}
+      <Section title="② 컬럼 타입 변경 및 이름 변경" desc="감지된 타입을 수동으로 변경하거나 컬럼 이름을 변경합니다">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ds.colMeta.map((col) => {
+            const ov = colOverrides[col.name] || {};
+            return (
+              <div key={col.name} style={{ display: "grid", gridTemplateColumns: "1fr 140px 1fr", gap: 10, alignItems: "center", padding: "9px 12px", background: C.bgS, borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bd}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)" }}>{col.name}</span>
+                  <TypeBadge type={ov.type || col.type} />
+                </div>
+                <select value={ov.type || col.type} onChange={(e) => override(col.name, "type", e.target.value)}
+                  style={{ fontSize: 12, padding: "5px 8px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }}>
+                  {ALL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <input placeholder={`컬럼명 변경 (현재: ${col.name})`} value={ov.rename ?? ""} onChange={(e) => override(col.name, "rename", e.target.value)}
+                  style={{ fontSize: 12, padding: "5px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }} />
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      {/* ③ 특정 값 → null 치환 */}
+      <Section title="③ 특정 값을 null로 치환" desc="'N/A', '-', '없음' 같은 값을 결측값(null)으로 처리합니다. 쉼표로 여러 값 입력 가능">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ds.colMeta.map((col) => {
+            const ov = colOverrides[col.name] || {};
+            const rawInput = ov._nullInput ?? "";
+            return (
+              <div key={col.name} style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "center", padding: "8px 12px", background: C.bgS, borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bd}` }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input placeholder='예: N/A, -, 없음, 0' value={rawInput} onChange={(e) => { override(col.name, "_nullInput", e.target.value); override(col.name, "nullValues", e.target.value.split(",").map((v) => v.trim()).filter(Boolean)); }}
+                    style={{ flex: 1, fontSize: 12, padding: "5px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }} />
+                  {(ov.nullValues || []).length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {(ov.nullValues || []).map((v) => <span key={v} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 10, background: "#FAEEDA", color: "#633806" }}>{v}</span>)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      {/* ④ 결측값 채우기 */}
+      <Section title="④ 결측값 처리" desc="null인 값을 통계값 또는 직접 입력한 값으로 채웁니다">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ds.colMeta.map((col) => {
+            const strategy = fillStrategy[col.name] || "none";
+            const nullCount = col.stats.nullCount;
+            return (
+              <div key={col.name} style={{ padding: "9px 12px", background: C.bgS, borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bd}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: strategy !== "none" ? 10 : 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)", minWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
+                  <span style={{ fontSize: 11, color: nullCount > 0 ? "#A32D2D" : C.txT, background: nullCount > 0 ? "#FCEBEB" : C.bgT, padding: "2px 7px", borderRadius: 4 }}>결측 {nullCount}개</span>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {FILL_OPTIONS.filter((o) => col.type === "number" || !["mean", "median"].includes(o.id)).map((o) => (
+                      <span key={o.id} onClick={() => setFillStrategy((p) => ({ ...p, [col.name]: o.id }))} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 10, cursor: "pointer", background: strategy === o.id ? C.info : C.bg, color: strategy === o.id ? C.infoTx : C.txS, border: `0.5px solid ${strategy === o.id ? C.infoTx : C.bd}`, fontWeight: strategy === o.id ? 500 : 400 }}>{o.label}</span>
+                    ))}
+                  </div>
+                </div>
+                {strategy === "custom" && (
+                  <input placeholder="채울 값 입력" value={fillCustom[col.name] || ""} onChange={(e) => setFillCustom((p) => ({ ...p, [col.name]: e.target.value }))}
+                    style={{ width: "100%", fontSize: 12, padding: "5px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx, boxSizing: "border-box" }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
+      {/* ⑤ 문자열 정제 */}
+      <Section title="⑤ 문자열 정제" desc="공백 제거, 대소문자 변환 등 텍스트 컬럼 정리">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {ds.colMeta.filter((c) => ["text", "category"].includes(c.type)).map((col) => {
+            const ops_ = strOps[col.name] || [];
+            return (
+              <div key={col.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: C.bgS, borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bd}` }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)", minWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{col.name}</span>
+                {[{ id: "trim", label: "공백 제거" }, { id: "lower", label: "소문자" }, { id: "upper", label: "대문자" }].map((op) => (
+                  <span key={op.id} onClick={() => toggleStrOp(col.name, op.id)} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 10, cursor: "pointer", background: ops_.includes(op.id) ? C.success : C.bg, color: ops_.includes(op.id) ? C.successTx : C.txS, border: `0.5px solid ${ops_.includes(op.id) ? C.successTx : C.bd}`, fontWeight: ops_.includes(op.id) ? 500 : 400 }}>{op.label}</span>
+                ))}
+              </div>
+            );
+          })}
+          {!ds.colMeta.filter((c) => ["text", "category"].includes(c.type)).length && <div style={{ fontSize: 13, color: C.txT, padding: "12px" }}>텍스트/범주형 컬럼이 없습니다.</div>}
+        </div>
+      </Section>
+
+      {/* ⑥ 중복 행 제거 */}
+      <Section title="⑥ 중복 행 제거" desc="선택한 컬럼 기준으로 중복 행을 제거합니다. 첫 번째 행만 유지합니다">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          {ds.columns.map((col) => (
+            <span key={col} onClick={() => toggleDedupCol(col)} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 10, cursor: "pointer", background: dedupCols.includes(col) ? "#E1F5EE" : C.bg, color: dedupCols.includes(col) ? "#085041" : C.txS, border: `0.5px solid ${dedupCols.includes(col) ? "#0F6E56" : C.bd}`, fontFamily: "var(--font-mono)", fontWeight: dedupCols.includes(col) ? 500 : 400 }}>{col}</span>
+          ))}
+        </div>
+        {dedupCols.length > 0 && <div style={{ fontSize: 12, color: C.txS }}>{dedupCols.join(", ")} 기준으로 중복 제거 예정</div>}
+      </Section>
+
+      {/* Apply button */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, paddingTop: 16, borderTop: `0.5px solid ${C.bd}` }}>
+        <Btn variant="primary" onClick={applyAll}>전처리 적용 및 파일 업데이트</Btn>
+        <span style={{ fontSize: 12, color: C.txS }}>적용하면 파일 목록 탭의 데이터가 변경됩니다</span>
+      </div>
+
+      {/* Log */}
+      {log.length > 0 && (
+        <div style={{ marginTop: 16, background: C.bgS, borderRadius: "var(--border-radius-md)", padding: "12px 14px", border: `0.5px solid ${C.bd}` }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: C.txS, marginBottom: 8 }}>적용 로그</div>
+          {log.slice().reverse().map((entry, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.tx, display: "flex", gap: 10, marginBottom: 4 }}>
+              <span style={{ color: C.txT, fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{entry.ts}</span>
+              <span>{entry.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, desc, children }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 12 }}>
+      <div onClick={() => setOpen((p) => !p)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", cursor: "pointer", background: C.bgS, borderBottom: open ? `0.5px solid ${C.bd}` : "none" }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>{title}</div>
+          {desc && <div style={{ fontSize: 11, color: C.txS, marginTop: 2 }}>{desc}</div>}
+        </div>
+        <span style={{ fontSize: 12, color: C.txT }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && <div style={{ padding: 14 }}>{children}</div>}
+    </div>
+  );
+}
+
+// ── Merge / Union panels ──────────────────────────────────────────────────────
+function MergePanel({ datasets, onResult }) {
+  const [leftIdx, setLeftIdx] = useState(0); const [rightIdx, setRightIdx] = useState(1);
+  const [leftKey, setLeftKey] = useState(""); const [rightKey, setRightKey] = useState("");
+  const [joinType, setJoinType] = useState("inner");
+  const JOIN_TYPES = [{ id: "inner", label: "Inner", desc: "양쪽에 모두 있는 행" }, { id: "left", label: "Left", desc: "왼쪽 기준" }, { id: "right", label: "Right", desc: "오른쪽 기준" }, { id: "outer", label: "Outer", desc: "양쪽 모두 포함" }];
+  const handleMerge = () => {
+    if (!leftKey || !rightKey) return alert("조인 키를 선택해 주세요.");
+    if (leftIdx === rightIdx) return alert("서로 다른 파일을 선택해 주세요.");
+    const r = performJoin(datasets[leftIdx], datasets[rightIdx], leftKey, rightKey, joinType);
+    r.name = `merge_${datasets[leftIdx].name.replace(/\.[^.]+$/, "")}_${datasets[rightIdx].name.replace(/\.[^.]+$/, "")}`;
+    onResult(r);
+  };
+  return (
+    <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ padding: "13px 18px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#EEEDFE", color: "#3C3489", fontWeight: 500 }}>Merge</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.tx }}>2개 파일 조인</span>
+      </div>
+      <div style={{ padding: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+          {[{ label: "왼쪽 (Left)", idx: leftIdx, setIdx: setLeftIdx, key: leftKey, setKey: setLeftKey }, { label: "오른쪽 (Right)", idx: rightIdx, setIdx: setRightIdx, key: rightKey, setKey: setRightKey }].map(({ label, idx, setIdx, key, setKey }) => (
+            <div key={label}>
+              <div style={{ fontSize: 12, color: C.txS, marginBottom: 5, fontWeight: 500 }}>{label}</div>
+              <select value={idx} onChange={(e) => { setIdx(+e.target.value); setKey(""); }} style={{ width: "100%", marginBottom: 8, fontSize: 13, padding: "6px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }}>
+                {datasets.map((ds, i) => <option key={i} value={i}>{ds.name}</option>)}
+              </select>
+              <select value={key} onChange={(e) => setKey(e.target.value)} style={{ width: "100%", fontSize: 13, padding: "6px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }}>
+                <option value="">— 조인 키 선택 —</option>
+                {datasets[idx]?.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {JOIN_TYPES.map((jt) => <div key={jt.id} onClick={() => setJoinType(jt.id)} style={{ flex: 1, padding: "9px 10px", borderRadius: "var(--border-radius-md)", border: `${joinType === jt.id ? "2px solid #185FA5" : `0.5px solid ${C.bd}`}`, cursor: "pointer", background: joinType === jt.id ? "#E6F1FB" : C.bg }}><div style={{ fontSize: 12, fontWeight: 500, color: joinType === jt.id ? "#185FA5" : C.tx }}>{jt.label}</div><div style={{ fontSize: 11, color: C.txS }}>{jt.desc}</div></div>)}
+        </div>
+        <Btn variant="primary" onClick={handleMerge}>Merge 실행</Btn>
+      </div>
+    </div>
+  );
+}
+
+function UnionPanel({ datasets, onResult }) {
+  const [selected, setSelected] = useState(() => new Set(datasets.map((_, i) => i)));
+  const [mode, setMode] = useState("outer");
+  const toggle = (i) => setSelected((p) => { const s = new Set(p); s.has(i) ? s.delete(i) : s.add(i); return s; });
+  const selDs = datasets.filter((_, i) => selected.has(i));
+  const commonCols = selDs.length ? selDs[0].columns.filter((c) => selDs.every((d) => d.columns.includes(c))) : [];
+  const allCols = [...new Set(selDs.flatMap((d) => d.columns))];
+  const handleUnion = () => {
+    if (selDs.length < 2) return alert("2개 이상 선택해 주세요.");
+    const r = performUnion(selDs, mode);
+    r.name = `union_${selDs.length}files`;
+    onResult(r);
+  };
+  return (
+    <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ padding: "13px 18px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#E1F5EE", color: "#085041", fontWeight: 500 }}>Union</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: C.tx }}>3개 이상 파일 결합</span>
+      </div>
+      <div style={{ padding: 18 }}>
+        <div style={{ fontSize: 12, color: C.txS, marginBottom: 8, fontWeight: 500 }}>결합할 파일 선택</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+          {datasets.map((ds, i) => <div key={i} onClick={() => toggle(i)} style={{ padding: "7px 12px", borderRadius: "var(--border-radius-md)", border: `${selected.has(i) ? "2px solid #0F6E56" : `0.5px solid ${C.bd}`}`, cursor: "pointer", background: selected.has(i) ? "#E1F5EE" : C.bg }}><span style={{ fontSize: 12, color: selected.has(i) ? "#085041" : C.tx, fontWeight: selected.has(i) ? 500 : 400 }}>{ds.name}</span> <span style={{ fontSize: 11, color: C.txS }}>{ds.rowCount}행</span></div>)}
+        </div>
+        {selDs.length >= 2 && <div style={{ display: "flex", gap: 12, marginBottom: 14, fontSize: 12, color: C.txS }}>
+          <span>공통 컬럼: <strong style={{ color: C.tx }}>{commonCols.length}개</strong></span>
+          <span>전체 컬럼: <strong style={{ color: C.tx }}>{allCols.length}개</strong></span>
+          <span>예상 행 수: <strong style={{ color: C.tx }}>{selDs.reduce((a, d) => a + d.rowCount, 0).toLocaleString()}</strong></span>
+        </div>}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          {[{ id: "outer", label: "전체 포함 (Outer)", desc: "모든 파일의 컬럼 포함" }, { id: "strict", label: "공통만 (Inner)", desc: "공통 컬럼만 유지" }].map((m) => <div key={m.id} onClick={() => setMode(m.id)} style={{ flex: 1, padding: "9px 12px", borderRadius: "var(--border-radius-md)", border: `${mode === m.id ? "2px solid #0F6E56" : `0.5px solid ${C.bd}`}`, cursor: "pointer", background: mode === m.id ? "#E1F5EE" : C.bg }}><div style={{ fontSize: 12, fontWeight: 500, color: mode === m.id ? "#085041" : C.tx }}>{m.label}</div><div style={{ fontSize: 11, color: C.txS }}>{m.desc}</div></div>)}
+        </div>
+        <Btn variant="success" onClick={handleUnion} disabled={selected.size < 2}>Union 실행</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── Viz Tab ───────────────────────────────────────────────────────────────────
+const CHART_PALETTE = ["#378ADD","#1D9E75","#D85A30","#7F77DD","#BA7517","#D4537E","#639922","#185FA5","#0F6E56","#993C1D"];
+
+function getNumericCols(ds)   { return ds.colMeta.filter(c => c.type === "number"); }
+function getCategoryCols(ds)  { return ds.colMeta.filter(c => c.type === "category"); }
+function getDateCols(ds)      { return ds.colMeta.filter(c => c.type === "date"); }
+
+// ─ Histogram (number) ───────────────────────────────────────────────────────
+function HistogramChart({ ds, col }) {
+  const vals = ds.rows.map(r => parseFloat(r[col])).filter(v => !isNaN(v));
+  if (!vals.length) return <NoData />;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const bins = 20;
+  const w = (max - min) / bins || 1;
+  const counts = Array.from({ length: bins }, (_, i) => ({
+    x: +(min + i * w).toFixed(3),
+    count: 0,
+  }));
+  vals.forEach(v => {
+    const idx = Math.min(Math.floor((v - min) / w), bins - 1);
+    counts[idx].count++;
+  });
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={counts} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" />
+        <XAxis dataKey="x" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} tickFormatter={v => +v.toFixed(2)} label={{ value: col, position: "insideBottom", offset: -14, fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <Tooltip formatter={(v) => [v, "빈도"]} labelFormatter={v => `값: ${(+v).toFixed(3)}`} contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} />
+        <Bar dataKey="count" fill="#378ADD" radius={[2,2,0,0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Bar chart (category) ─────────────────────────────────────────────────────
+function BarFreqChart({ ds, col, topN = 15 }) {
+  const freq = {};
+  ds.rows.forEach(r => { const v = String(r[col] ?? ""); freq[v] = (freq[v] || 0) + 1; });
+  const data = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, topN).map(([name, value]) => ({ name, value }));
+  if (!data.length) return <NoData />;
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(220, data.length * 28)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} width={100} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} />
+        <Bar dataKey="value" name="빈도" radius={[0,3,3,0]}>
+          {data.map((_, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Pie chart (category) ─────────────────────────────────────────────────────
+function PieFreqChart({ ds, col }) {
+  const freq = {};
+  ds.rows.forEach(r => { const v = String(r[col] ?? ""); freq[v] = (freq[v] || 0) + 1; });
+  const sorted = Object.entries(freq).sort((a,b) => b[1]-a[1]);
+  const top = sorted.slice(0, 8);
+  const otherSum = sorted.slice(8).reduce((a,[,c]) => a+c, 0);
+  const data = [...top.map(([name, value]) => ({ name, value })), ...(otherSum > 0 ? [{ name: "기타", value: otherSum }] : [])];
+  if (!data.length) return <NoData />;
+  const RADIAN = Math.PI / 180;
+  const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+    if (percent < 0.04) return null;
+    const r = innerRadius + (outerRadius - innerRadius) * 0.55;
+    return <text x={cx + r * Math.cos(-midAngle * RADIAN)} y={cy + r * Math.sin(-midAngle * RADIAN)} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11}>{`${(percent*100).toFixed(0)}%`}</text>;
+  };
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <PieChart>
+        <Pie data={data} cx="50%" cy="50%" outerRadius={110} dataKey="value" labelLine={false} label={renderLabel}>
+          {data.map((_, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
+        </Pie>
+        <Tooltip formatter={(v, n) => [v.toLocaleString(), n]} contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} />
+        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Scatter plot (num × num) ──────────────────────────────────────────────────
+function ScatterPlot({ ds, xCol, yCol }) {
+  const data = ds.rows.map(r => ({ x: parseFloat(r[xCol]), y: parseFloat(r[yCol]) })).filter(p => !isNaN(p.x) && !isNaN(p.y)).slice(0, 1000);
+  if (!data.length) return <NoData />;
+  // Pearson correlation
+  const n = data.length, sx = data.reduce((a,p)=>a+p.x,0)/n, sy = data.reduce((a,p)=>a+p.y,0)/n;
+  const num = data.reduce((a,p)=>a+(p.x-sx)*(p.y-sy),0);
+  const den = Math.sqrt(data.reduce((a,p)=>a+(p.x-sx)**2,0)*data.reduce((a,p)=>a+(p.y-sy)**2,0));
+  const r = den ? +(num/den).toFixed(3) : 0;
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 8, display: "flex", gap: 12 }}>
+        <span>상관계수 (r): <strong style={{ color: Math.abs(r) > 0.7 ? "#1D9E75" : Math.abs(r) > 0.4 ? "#BA7517" : "var(--color-text-primary)" }}>{r}</strong></span>
+        <span style={{ color: "var(--color-text-tertiary)" }}>{data.length >= 1000 ? "최대 1,000개 샘플 표시" : `${data.length}개 점`}</span>
+      </div>
+      <ResponsiveContainer width="100%" height={280}>
+        <ScatterChart margin={{ top: 4, right: 16, left: 0, bottom: 24 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" />
+          <XAxis type="number" dataKey="x" name={xCol} tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} label={{ value: xCol, position: "insideBottom", offset: -14, fontSize: 11, fill: "var(--color-text-secondary)" }} />
+          <YAxis type="number" dataKey="y" name={yCol} tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+          <Tooltip cursor={{ strokeDasharray: "3 3" }} content={({ payload }) => payload?.length ? <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, padding: "6px 10px", fontSize: 11 }}><div>{xCol}: {payload[0]?.payload?.x}</div><div>{yCol}: {payload[0]?.payload?.y}</div></div> : null} />
+          <Scatter data={data} fill="#378ADD" fillOpacity={0.55} r={3} />
+        </ScatterChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─ Box plot (approx with bar) ────────────────────────────────────────────────
+function BoxPlotChart({ ds, cols }) {
+  const data = cols.map(col => {
+    const vals = ds.rows.map(r => parseFloat(r[col])).filter(v => !isNaN(v)).sort((a,b)=>a-b);
+    if (!vals.length) return null;
+    const q1 = vals[Math.floor(vals.length*0.25)];
+    const median = vals[Math.floor(vals.length*0.5)];
+    const q3 = vals[Math.floor(vals.length*0.75)];
+    const iqr = q3 - q1;
+    const min = Math.max(vals[0], q1 - 1.5*iqr);
+    const max = Math.min(vals[vals.length-1], q3 + 1.5*iqr);
+    return { name: col, min, q1, median, q3, max };
+  }).filter(Boolean);
+  if (!data.length) return <NoData />;
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} formatter={(v) => [+v.toFixed(3)]} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="min" stackId="a" fill="transparent" name="최솟값" />
+        <Bar dataKey="q1" stackId="a" fill="#B5D4F4" name="Q1" />
+        <Bar dataKey="median" stackId="a" fill="#185FA5" name="중앙값" />
+        <Bar dataKey="q3" stackId="a" fill="#B5D4F4" name="Q3" />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Line chart (date × number) ────────────────────────────────────────────────
+function LineTimeChart({ ds, xCol, yCol }) {
+  const data = ds.rows.map(r => ({ x: String(r[xCol] ?? ""), y: parseFloat(r[yCol]) })).filter(p => p.x && !isNaN(p.y)).sort((a,b) => a.x.localeCompare(b.x)).slice(0, 500);
+  if (!data.length) return <NoData />;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 28 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" />
+        <XAxis dataKey="x" tick={{ fontSize: 10, fill: "var(--color-text-secondary)" }} interval="preserveStartEnd" label={{ value: xCol, position: "insideBottom", offset: -16, fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <YAxis tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} />
+        <Line type="monotone" dataKey="y" name={yCol} stroke="#185FA5" dot={false} strokeWidth={2} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Bar grouped (category × number) ───────────────────────────────────────────
+function GroupedBarChart({ ds, catCol, numCol, topN = 12 }) {
+  const agg = {};
+  ds.rows.forEach(r => {
+    const k = String(r[catCol] ?? ""); const v = parseFloat(r[numCol]);
+    if (!isNaN(v)) { if (!agg[k]) agg[k] = { sum:0, count:0 }; agg[k].sum += v; agg[k].count++; }
+  });
+  const data = Object.entries(agg).map(([name, { sum, count }]) => ({ name, avg: +(sum/count).toFixed(3), total: +sum.toFixed(3) })).sort((a,b)=>b.avg-a.avg).slice(0, topN);
+  if (!data.length) return <NoData />;
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(220, data.length * 30)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "var(--color-text-secondary)" }} width={100} />
+        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)" }} />
+        <Bar dataKey="avg" name={`${numCol} 평균`} radius={[0,3,3,0]}>
+          {data.map((_, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─ Correlation heatmap ────────────────────────────────────────────────────────
+function CorrelationHeatmap({ ds }) {
+  const numCols = getNumericCols(ds).map(c => c.name).slice(0, 10);
+  if (numCols.length < 2) return <div style={{ padding: 24, textAlign:"center", color:"var(--color-text-tertiary)", fontSize:13 }}>숫자형 컬럼이 2개 이상 필요합니다.</div>;
+  const vals = {};
+  numCols.forEach(c => { vals[c] = ds.rows.map(r => parseFloat(r[c])).filter(v => !isNaN(v)); });
+  const mean = (arr) => arr.reduce((a,b)=>a+b,0)/arr.length;
+  const corr = (a, b) => {
+    const ma = mean(a), mb = mean(b);
+    const num = a.reduce((s,v,i)=>s+(v-ma)*(b[i]-mb),0);
+    const den = Math.sqrt(a.reduce((s,v)=>s+(v-ma)**2,0)*b.reduce((s,v)=>s+(v-mb)**2,0));
+    return den ? +(num/den).toFixed(2) : 0;
+  };
+  const matrix = numCols.map(c1 => numCols.map(c2 => {
+    const minLen = Math.min(vals[c1].length, vals[c2].length);
+    return corr(vals[c1].slice(0,minLen), vals[c2].slice(0,minLen));
+  }));
+  const cellSize = Math.min(64, Math.floor(560 / numCols.length));
+  const colorScale = (v) => {
+    const abs = Math.abs(v);
+    if (v >= 0) return `rgba(24,95,165,${0.1 + abs*0.85})`;
+    return `rgba(216,90,48,${0.1 + abs*0.85})`;
+  };
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "inline-block", minWidth: "100%" }}>
+        <div style={{ display: "flex", marginLeft: cellSize + 4 }}>
+          {numCols.map(c => <div key={c} style={{ width: cellSize, fontSize: 10, color: "var(--color-text-secondary)", textAlign:"center", padding: "0 2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", transform:"rotate(-30deg)", transformOrigin:"bottom left", marginBottom: 4, height: 42 }}>{c}</div>)}
+        </div>
+        {matrix.map((row, i) => (
+          <div key={i} style={{ display:"flex", alignItems:"center", marginBottom: 2 }}>
+            <div style={{ width: cellSize, fontSize: 10, color:"var(--color-text-secondary)", textAlign:"right", paddingRight: 6, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", flexShrink:0 }}>{numCols[i]}</div>
+            {row.map((v, j) => (
+              <div key={j} title={`${numCols[i]} × ${numCols[j]}: ${v}`} style={{ width: cellSize, height: cellSize, background: colorScale(v), display:"flex", alignItems:"center", justifyContent:"center", fontSize: cellSize > 44 ? 11 : 9, fontWeight: 500, color: Math.abs(v) > 0.5 ? "#fff" : "var(--color-text-primary)", borderRadius: 3, margin: 1, cursor:"default", flexShrink:0 }}>{v}</div>
+            ))}
+          </div>
+        ))}
+        <div style={{ display:"flex", gap:16, marginTop:10, fontSize:11, color:"var(--color-text-secondary)" }}>
+          <span style={{ display:"flex", alignItems:"center", gap:4 }}><span style={{ width:12, height:12, borderRadius:2, background:"rgba(24,95,165,0.8)", display:"inline-block" }}></span>양의 상관</span>
+          <span style={{ display:"flex", alignItems:"center", gap:4 }}><span style={{ width:12, height:12, borderRadius:2, background:"rgba(216,90,48,0.8)", display:"inline-block" }}></span>음의 상관</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─ Missing values bar ─────────────────────────────────────────────────────────
+function MissingChart({ ds }) {
+  const data = ds.colMeta.filter(c => c.stats.nullCount > 0).map(c => ({ name: c.name, missing: c.stats.nullCount, pct: +((c.stats.nullCount/ds.rowCount)*100).toFixed(1) })).sort((a,b)=>b.pct-a.pct);
+  if (!data.length) return <div style={{ padding: 24, textAlign:"center", color:"var(--color-text-success)", fontSize:13 }}>결측값이 없습니다.</div>;
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(180, data.length * 30)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-tertiary)" horizontal={false} />
+        <XAxis type="number" tickFormatter={v => `${v}%`} tick={{ fontSize: 11, fill:"var(--color-text-secondary)" }} domain={[0,100]} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill:"var(--color-text-secondary)" }} width={110} />
+        <Tooltip formatter={(v, n, props) => [`${props.payload?.missing?.toLocaleString()}개 (${props.payload?.pct}%)`, "결측값"]} contentStyle={{ fontSize: 12, borderRadius: 8, border:"0.5px solid var(--color-border-tertiary)" }} />
+        <Bar dataKey="pct" name="결측 비율" radius={[0,3,3,0]} fill="#F09595">
+          {data.map((d, i) => <Cell key={i} fill={d.pct > 30 ? "#E24B4A" : d.pct > 10 ? "#EF9F27" : "#F09595"} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function NoData() {
+  return <div style={{ padding: 32, textAlign:"center", color:"var(--color-text-tertiary)", fontSize:13 }}>표시할 데이터가 없습니다.</div>;
+}
+
+// ─ ChartCard wrapper ──────────────────────────────────────────────────────────
+function ChartCard({ title, subtitle, children }) {
+  return (
+    <div style={{ border:`0.5px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:16 }}>
+      <div style={{ padding:"11px 16px", background:C.bgS, borderBottom:`0.5px solid ${C.bd}` }}>
+        <div style={{ fontSize:13, fontWeight:500, color:C.tx }}>{title}</div>
+        {subtitle && <div style={{ fontSize:11, color:C.txS, marginTop:2 }}>{subtitle}</div>}
+      </div>
+      <div style={{ padding:"16px 16px 12px" }}>{children}</div>
+    </div>
+  );
+}
+
+// ─ VizTab main ────────────────────────────────────────────────────────────────
+function VizTab({ datasets, mergeResults }) {
+  const allDs = [...datasets, ...mergeResults];
+  const [selId, setSelId] = useState(() => allDs[0]?.id ?? "");
+  const [activeSection, setActiveSection] = useState("auto");
+
+  // custom chart state
+  const [chartType, setChartType]     = useState("bar");
+  const [xCol, setXCol]               = useState("");
+  const [yCol, setYCol]               = useState("");
+  const [xCol2, setXCol2]             = useState("");
+  const [yCol2, setYCol2]             = useState("");
+  const [catCol, setCatCol]           = useState("");
+  const [numCol, setNumCol]           = useState("");
+
+  const ds = allDs.find(d => d.id === selId);
+
+  // reset selections when ds changes
+  const prevId = useRef(selId);
+  if (prevId.current !== selId) {
+    prevId.current = selId;
+    setXCol(""); setYCol(""); setXCol2(""); setYCol2(""); setCatCol(""); setNumCol("");
+    setActiveSection("auto");
+  }
+
+  if (!ds) return <div style={{ padding:48, textAlign:"center", color:C.txT }}>파일을 먼저 업로드해 주세요.</div>;
+
+  const numCols  = getNumericCols(ds);
+  const catCols  = getCategoryCols(ds);
+  const dateCols = getDateCols(ds);
+
+  const SECTIONS = [
+    { id:"auto",    label:"자동 분석" },
+    { id:"dist",    label:"분포" },
+    { id:"cat",     label:"범주형" },
+    { id:"corr",    label:"상관관계" },
+    { id:"missing", label:"결측값" },
+    { id:"custom",  label:"커스텀 차트" },
+  ];
+
+  const CUSTOM_CHART_TYPES = [
+    { id:"bar",      label:"막대 차트",    desc:"범주 × 빈도/평균" },
+    { id:"pie",      label:"파이 차트",    desc:"범주 비율" },
+    { id:"hist",     label:"히스토그램",   desc:"숫자 분포" },
+    { id:"scatter",  label:"산점도",       desc:"숫자 × 숫자" },
+    { id:"line",     label:"라인 차트",    desc:"날짜/순서 × 숫자" },
+    { id:"grouped",  label:"그룹 막대",    desc:"범주별 숫자 평균" },
+  ];
+
+  return (
+    <div>
+      {/* 파일 선택 */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+        <span style={{ fontSize:13, color:C.txS, whiteSpace:"nowrap" }}>데이터셋</span>
+        <select value={selId} onChange={e => setSelId(e.target.value)}
+          style={{ flex:1, fontSize:13, padding:"7px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+          {allDs.map(d => <option key={d.id} value={d.id}>{d.name} ({d.rowCount.toLocaleString()}행 × {d.columns.length}열)</option>)}
+        </select>
+      </div>
+
+      {/* Section tabs */}
+      <div style={{ display:"flex", gap:4, marginBottom:20, borderBottom:`0.5px solid ${C.bd}`, overflowX:"auto" }}>
+        {SECTIONS.map(s => (
+          <button key={s.id} onClick={() => setActiveSection(s.id)}
+            style={{ fontSize:12, padding:"8px 14px", cursor:"pointer", background:"transparent", border:"none", borderBottom: activeSection===s.id ? `2px solid ${C.infoTx}` : "2px solid transparent", color: activeSection===s.id ? C.infoTx : C.txS, fontWeight: activeSection===s.id ? 500 : 400, whiteSpace:"nowrap", marginBottom:-0.5 }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── 자동 분석 ────────────────────────────────────────────────────── */}
+      {activeSection === "auto" && (
+        <div>
+          {/* 데이터 구성 요약 */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:10, marginBottom:20 }}>
+            {[["전체 행", ds.rowCount.toLocaleString()], ["숫자형 컬럼", numCols.length], ["범주형 컬럼", catCols.length], ["날짜형 컬럼", dateCols.length]].map(([l,v]) => (
+              <div key={l} style={{ background:C.bgS, borderRadius:"var(--border-radius-md)", padding:"10px 14px" }}>
+                <div style={{ fontSize:11, color:C.txS, marginBottom:3 }}>{l}</div>
+                <div style={{ fontSize:18, fontWeight:500, color:C.tx, fontFamily:"var(--font-mono)" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Top numeric distributions */}
+          {numCols.length > 0 && (
+            <ChartCard title="숫자형 컬럼 분포 (히스토그램)" subtitle={`${numCols.slice(0,4).map(c=>c.name).join(" · ")} 등`}>
+              <div style={{ display:"grid", gridTemplateColumns: numCols.length > 1 ? "1fr 1fr" : "1fr", gap:16 }}>
+                {numCols.slice(0,4).map(col => (
+                  <div key={col.name}>
+                    <div style={{ fontSize:11, color:C.txS, marginBottom:4, fontFamily:"var(--font-mono)" }}>{col.name}</div>
+                    <HistogramChart ds={ds} col={col.name} />
+                  </div>
+                ))}
+              </div>
+            </ChartCard>
+          )}
+
+          {/* Top category distributions */}
+          {catCols.length > 0 && (
+            <ChartCard title="범주형 컬럼 분포 (상위 값)" subtitle={catCols.slice(0,3).map(c=>c.name).join(" · ")}>
+              <div style={{ display:"grid", gridTemplateColumns: catCols.length > 1 ? "1fr 1fr" : "1fr", gap:20 }}>
+                {catCols.slice(0,2).map(col => (
+                  <div key={col.name}>
+                    <div style={{ fontSize:11, color:C.txS, marginBottom:4, fontFamily:"var(--font-mono)" }}>{col.name}</div>
+                    <BarFreqChart ds={ds} col={col.name} topN={8} />
+                  </div>
+                ))}
+              </div>
+            </ChartCard>
+          )}
+
+          {/* Correlation heatmap if 2+ numeric cols */}
+          {numCols.length >= 2 && (
+            <ChartCard title="수치형 컬럼 상관관계 히트맵" subtitle="색이 진할수록 상관관계가 강함">
+              <CorrelationHeatmap ds={ds} />
+            </ChartCard>
+          )}
+
+          {/* Missing values */}
+          {ds.colMeta.some(c => c.stats.nullCount > 0) && (
+            <ChartCard title="결측값 현황" subtitle="결측 비율이 높은 컬럼">
+              <MissingChart ds={ds} />
+            </ChartCard>
+          )}
+
+          {/* category × number auto */}
+          {catCols.length > 0 && numCols.length > 0 && (
+            <ChartCard title={`${catCols[0].name} 별 ${numCols[0].name} 평균`} subtitle="범주형 × 숫자형 자동 조합">
+              <GroupedBarChart ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
+            </ChartCard>
+          )}
+        </div>
+      )}
+
+      {/* ── 분포 탭 ──────────────────────────────────────────────────────── */}
+      {activeSection === "dist" && (
+        <div>
+          {numCols.length === 0 ? (
+            <div style={{ padding:40, textAlign:"center", color:C.txT, fontSize:13 }}>숫자형 컬럼이 없습니다.</div>
+          ) : (
+            <>
+              <div style={{ fontSize:12, color:C.txS, marginBottom:12 }}>숫자형 컬럼 {numCols.length}개 — 각 컬럼의 값 분포를 히스토그램으로 표시합니다</div>
+              {numCols.map(col => (
+                <ChartCard key={col.name} title={`분포: ${col.name}`}
+                  subtitle={`평균 ${col.stats.mean} · 중앙값 ${col.stats.median} · 표준편차 ${col.stats.std}`}>
+                  <HistogramChart ds={ds} col={col.name} />
+                </ChartCard>
+              ))}
+              {numCols.length >= 2 && (
+                <ChartCard title="박스 플롯 요약" subtitle="Q1·중앙값·Q3 비교">
+                  <BoxPlotChart ds={ds} cols={numCols.map(c=>c.name)} />
+                </ChartCard>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── 범주형 탭 ────────────────────────────────────────────────────── */}
+      {activeSection === "cat" && (
+        <div>
+          {catCols.length === 0 ? (
+            <div style={{ padding:40, textAlign:"center", color:C.txT, fontSize:13 }}>범주형 컬럼이 없습니다.</div>
+          ) : catCols.map(col => (
+            <ChartCard key={col.name} title={`범주 분포: ${col.name}`} subtitle={`고유값 ${col.stats.unique}개`}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                <div><div style={{ fontSize:11, color:C.txS, marginBottom:6 }}>막대 차트 (빈도)</div><BarFreqChart ds={ds} col={col.name} /></div>
+                <div><div style={{ fontSize:11, color:C.txS, marginBottom:6 }}>파이 차트 (비율)</div><PieFreqChart ds={ds} col={col.name} /></div>
+              </div>
+            </ChartCard>
+          ))}
+        </div>
+      )}
+
+      {/* ── 상관관계 탭 ──────────────────────────────────────────────────── */}
+      {activeSection === "corr" && (
+        <div>
+          <ChartCard title="상관관계 히트맵" subtitle="숫자형 컬럼 간 피어슨 상관계수 (-1 ~ 1)">
+            <CorrelationHeatmap ds={ds} />
+          </ChartCard>
+          {numCols.length >= 2 && (
+            <ChartCard title="산점도 선택" subtitle="두 컬럼을 선택해 관계를 확인합니다">
+              <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                <div style={{ flex:1, minWidth:140 }}>
+                  <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>X 축</div>
+                  <select value={xCol2} onChange={e => setXCol2(e.target.value)}
+                    style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                    <option value="">— 선택 —</option>
+                    {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex:1, minWidth:140 }}>
+                  <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>Y 축</div>
+                  <select value={yCol2} onChange={e => setYCol2(e.target.value)}
+                    style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                    <option value="">— 선택 —</option>
+                    {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              {xCol2 && yCol2 && xCol2 !== yCol2
+                ? <ScatterPlot ds={ds} xCol={xCol2} yCol={yCol2} />
+                : <div style={{ padding:24, textAlign:"center", color:C.txT, fontSize:13 }}>서로 다른 두 컬럼을 선택해 주세요.</div>
+              }
+            </ChartCard>
+          )}
+        </div>
+      )}
+
+      {/* ── 결측값 탭 ────────────────────────────────────────────────────── */}
+      {activeSection === "missing" && (
+        <ChartCard title="결측값 현황" subtitle="컬럼별 결측 비율">
+          <MissingChart ds={ds} />
+        </ChartCard>
+      )}
+
+      {/* ── 커스텀 차트 탭 ───────────────────────────────────────────────── */}
+      {activeSection === "custom" && (
+        <div>
+          {/* 차트 유형 선택 */}
+          <div style={{ border:`0.5px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:16 }}>
+            <div style={{ padding:"12px 16px", background:C.bgS, borderBottom:`0.5px solid ${C.bd}` }}>
+              <span style={{ fontSize:13, fontWeight:500, color:C.tx }}>차트 유형 & 컬럼 선택</span>
+            </div>
+            <div style={{ padding:16 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:16 }}>
+                {CUSTOM_CHART_TYPES.map(t => (
+                  <div key={t.id} onClick={() => { setChartType(t.id); setXCol(""); setYCol(""); setCatCol(""); setNumCol(""); }}
+                    style={{ padding:"9px 12px", borderRadius:"var(--border-radius-md)", border:`${chartType===t.id ? "2px solid #185FA5" : `0.5px solid ${C.bd}`}`, cursor:"pointer", background: chartType===t.id ? "#E6F1FB" : C.bg }}>
+                    <div style={{ fontSize:12, fontWeight:500, color: chartType===t.id ? "#185FA5" : C.tx }}>{t.label}</div>
+                    <div style={{ fontSize:11, color:C.txS }}>{t.desc}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Column pickers per chart type */}
+              <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+                {(chartType === "bar" || chartType === "pie") && (
+                  <div style={{ flex:1, minWidth:160 }}>
+                    <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>범주 컬럼</div>
+                    <select value={catCol} onChange={e => setCatCol(e.target.value)}
+                      style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                      <option value="">— 선택 —</option>
+                      {[...catCols,...numCols].map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {chartType === "hist" && (
+                  <div style={{ flex:1, minWidth:160 }}>
+                    <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>숫자 컬럼</div>
+                    <select value={xCol} onChange={e => setXCol(e.target.value)}
+                      style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                      <option value="">— 선택 —</option>
+                      {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {chartType === "scatter" && (
+                  <>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>X 축 (숫자)</div>
+                      <select value={xCol} onChange={e => setXCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>Y 축 (숫자)</div>
+                      <select value={yCol} onChange={e => setYCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+                {chartType === "line" && (
+                  <>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>X 축 (날짜/텍스트)</div>
+                      <select value={xCol} onChange={e => setXCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {ds.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>Y 축 (숫자)</div>
+                      <select value={yCol} onChange={e => setYCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+                {chartType === "grouped" && (
+                  <>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>범주 컬럼</div>
+                      <select value={catCol} onChange={e => setCatCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {catCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex:1, minWidth:140 }}>
+                      <div style={{ fontSize:12, color:C.txS, marginBottom:4 }}>숫자 컬럼</div>
+                      <select value={numCol} onChange={e => setNumCol(e.target.value)}
+                        style={{ width:"100%", fontSize:13, padding:"6px 10px", borderRadius:"var(--border-radius-md)", border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx }}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Render selected chart */}
+          <ChartCard title={CUSTOM_CHART_TYPES.find(t=>t.id===chartType)?.label || ""} subtitle="컬럼을 선택하면 차트가 표시됩니다">
+            {chartType === "bar"     && catCol  ? <BarFreqChart   ds={ds} col={catCol}             /> : null}
+            {chartType === "pie"     && catCol  ? <PieFreqChart   ds={ds} col={catCol}             /> : null}
+            {chartType === "hist"    && xCol    ? <HistogramChart ds={ds} col={xCol}               /> : null}
+            {chartType === "scatter" && xCol && yCol && xCol!==yCol ? <ScatterPlot ds={ds} xCol={xCol} yCol={yCol} /> : null}
+            {chartType === "line"    && xCol && yCol ? <LineTimeChart  ds={ds} xCol={xCol} yCol={yCol} /> : null}
+            {chartType === "grouped" && catCol && numCol ? <GroupedBarChart ds={ds} catCol={catCol} numCol={numCol} /> : null}
+            {(
+              (chartType==="bar"&&!catCol)||(chartType==="pie"&&!catCol)||(chartType==="hist"&&!xCol)||
+              (chartType==="scatter"&&(!xCol||!yCol||xCol===yCol))||(chartType==="line"&&(!xCol||!yCol))||
+              (chartType==="grouped"&&(!catCol||!numCol))
+            ) && <div style={{ padding:32, textAlign:"center", color:C.txT, fontSize:13 }}>위에서 컬럼을 선택해 주세요.</div>}
+          </ChartCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EDA helpers ──────────────────────────────────────────────────────────────
+function buildDataSummary(ds) {
+  const sampleRows = ds.rows.slice(0, 100);
+  const colSummaries = ds.colMeta.map((col) => {
+    const base = `  - ${col.name} (${col.type}): 고유값 ${col.stats.unique}개, 결측 ${col.stats.nullCount}개`;
+    if (col.type === "number" && col.stats.mean !== undefined) {
+      return base + `, 평균 ${col.stats.mean}, 최솟값 ${col.stats.min}, 최댓값 ${col.stats.max}, 표준편차 ${col.stats.std}`;
+    }
+    if (col.type === "category" && col.stats.topValues) {
+      const top = col.stats.topValues.map(([v, c]) => `${v}(${c})`).join(", ");
+      return base + `, 상위값: ${top}`;
+    }
+    return base;
+  });
+  const sampleCsv = [
+    ds.columns.join(","),
+    ...sampleRows.map((r) => ds.columns.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(",")),
+  ].join("\n");
+  return { colSummaries, sampleCsv, rowCount: ds.rowCount, colCount: ds.columns.length };
+}
+
+function buildPrompt(ds, analysisType, customQuestion) {
+  const { colSummaries, sampleCsv, rowCount, colCount } = buildDataSummary(ds);
+  const dataContext = `
+## 데이터셋 정보
+- 파일명: ${ds.name}
+- 전체 행 수: ${rowCount.toLocaleString()}행
+- 열 수: ${colCount}개
+
+## 컬럼별 요약
+${colSummaries.join("\n")}
+
+## 샘플 데이터 (최대 100행)
+\`\`\`csv
+${sampleCsv}
+\`\`\`
+`.trim();
+
+  const prompts = {
+    overview: `당신은 데이터 분석 전문가입니다. 아래 데이터를 보고 전체적인 EDA(탐색적 데이터 분석) 보고서를 한국어로 작성해 주세요.\n\n분석 항목:\n1. 데이터 개요 및 품질 평가\n2. 각 컬럼의 특성과 분포 설명\n3. 주목할 만한 패턴이나 이상값\n4. 컬럼 간 관계 추정\n5. 데이터 활용 시 주의사항 및 권고사항\n\n${dataContext}`,
+    quality:  `당신은 데이터 품질 전문가입니다. 아래 데이터의 품질을 상세히 평가해 주세요. 한국어로 답변해 주세요.\n\n분석 항목:\n1. 결측값 현황 및 처리 방안\n2. 이상값(outlier) 가능성이 있는 컬럼\n3. 데이터 타입 불일치 여부\n4. 중복 가능성\n5. 데이터 정제 우선순위 및 구체적 방법 제안\n\n${dataContext}`,
+    insight:  `당신은 비즈니스 인사이트 전문가입니다. 아래 데이터에서 비즈니스 관점의 주요 인사이트를 도출해 주세요. 한국어로 답변해 주세요.\n\n분석 항목:\n1. 핵심 인사이트 (상위 3~5개)\n2. 주목해야 할 트렌드나 패턴\n3. 비즈니스 의사결정에 활용할 수 있는 시사점\n4. 추가로 수집하면 좋을 데이터 제안\n\n${dataContext}`,
+    custom:   `당신은 데이터 분석 전문가입니다. 아래 데이터에 대해 다음 질문에 한국어로 답변해 주세요.\n\n질문: ${customQuestion}\n\n${dataContext}`,
+  };
+  return prompts[analysisType] || prompts.overview;
+}
+
+async function callGemini(apiKey, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, maxOutputTokens: 4096 } }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "응답이 없습니다.";
+}
+
+// ── Simple markdown renderer ──────────────────────────────────────────────────
+function MdBlock({ text }) {
+  const lines = text.split("\n");
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^###\s/.test(line)) {
+      elements.push(<div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.tx, margin: "18px 0 6px" }}>{line.replace(/^###\s/, "")}</div>);
+    } else if (/^##\s/.test(line)) {
+      elements.push(<div key={i} style={{ fontSize: 15, fontWeight: 500, color: C.tx, margin: "22px 0 8px", paddingBottom: 6, borderBottom: `0.5px solid ${C.bd}` }}>{line.replace(/^##\s/, "")}</div>);
+    } else if (/^#\s/.test(line)) {
+      elements.push(<div key={i} style={{ fontSize: 16, fontWeight: 500, color: C.tx, margin: "24px 0 10px" }}>{line.replace(/^#\s/, "")}</div>);
+    } else if (/^(\*|-)\s/.test(line)) {
+      const content = line.replace(/^(\*|-)\s/, "").replace(/\*\*(.+?)\*\*/g, "⟦$1⟧");
+      elements.push(
+        <div key={i} style={{ display: "flex", gap: 8, margin: "3px 0", paddingLeft: 8 }}>
+          <span style={{ color: C.txT, flexShrink: 0, marginTop: 2 }}>•</span>
+          <span style={{ fontSize: 13, color: C.tx, lineHeight: 1.65 }}>{content.split("⟦").map((part, j) => {
+            if (part.includes("⟧")) { const [bold, rest] = part.split("⟧"); return <span key={j}><strong style={{ fontWeight: 500 }}>{bold}</strong>{rest}</span>; }
+            return part;
+          })}</span>
+        </div>
+      );
+    } else if (/^\d+\.\s/.test(line)) {
+      const num = line.match(/^(\d+)\./)[1];
+      const content = line.replace(/^\d+\.\s/, "");
+      elements.push(
+        <div key={i} style={{ display: "flex", gap: 8, margin: "4px 0", paddingLeft: 8 }}>
+          <span style={{ color: C.infoTx, fontWeight: 500, flexShrink: 0, fontSize: 12, minWidth: 18 }}>{num}.</span>
+          <span style={{ fontSize: 13, color: C.tx, lineHeight: 1.65 }}>{content.replace(/\*\*(.+?)\*\*/g, "§$1§").split("§").map((p, j) => j % 2 === 1 ? <strong key={j} style={{ fontWeight: 500 }}>{p}</strong> : p)}</span>
+        </div>
+      );
+    } else if (line.trim() === "") {
+      elements.push(<div key={i} style={{ height: 6 }} />);
+    } else {
+      const formatted = line.replace(/\*\*(.+?)\*\*/g, "§$1§");
+      elements.push(<p key={i} style={{ fontSize: 13, color: C.tx, lineHeight: 1.7, margin: "3px 0" }}>{formatted.split("§").map((p, j) => j % 2 === 1 ? <strong key={j} style={{ fontWeight: 500 }}>{p}</strong> : p)}</p>);
+    }
+    i++;
+  }
+  return <div>{elements}</div>;
+}
+
+// ── EDA Tab ───────────────────────────────────────────────────────────────────
+function EDATab({ datasets, allDatasets }) {
+  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("gemini_key") || "");
+  const [showKey, setShowKey] = useState(false);
+  const [selId, setSelId] = useState(() => datasets[0]?.id ?? "");
+  const [analysisType, setAnalysisType] = useState("overview");
+  const [customQ, setCustomQ] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]); // [{id, dsName, type, question, result, ts}]
+  const [error, setError] = useState("");
+
+  const ds = datasets.find((d) => d.id === selId);
+
+  const saveKey = (k) => { setApiKey(k); sessionStorage.setItem("gemini_key", k); };
+
+  const ANALYSIS_TYPES = [
+    { id: "overview", label: "전체 EDA", desc: "데이터 전반적인 분석 리포트", icon: "📊" },
+    { id: "quality",  label: "데이터 품질", desc: "결측값·이상값·정제 방안", icon: "🔍" },
+    { id: "insight",  label: "비즈니스 인사이트", desc: "패턴 발견 및 시사점", icon: "💡" },
+    { id: "custom",   label: "직접 질문", desc: "데이터에 대해 자유롭게 질문", icon: "💬" },
+  ];
+
+  const handleRun = async () => {
+    if (!apiKey.trim()) return setError("API 키를 입력해 주세요.");
+    if (!ds) return setError("분석할 파일을 선택해 주세요.");
+    if (analysisType === "custom" && !customQ.trim()) return setError("질문을 입력해 주세요.");
+    setError(""); setLoading(true);
+    try {
+      const prompt = buildPrompt(ds, analysisType, customQ);
+      const result = await callGemini(apiKey.trim(), prompt);
+      const typeLabel = ANALYSIS_TYPES.find((t) => t.id === analysisType)?.label || analysisType;
+      setResults((p) => [{ id: crypto.randomUUID(), dsName: ds.name, type: typeLabel, question: analysisType === "custom" ? customQ : typeLabel, result, ts: new Date().toLocaleTimeString() }, ...p]);
+    } catch (e) {
+      setError(`오류: ${e.message}`);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div>
+      {/* API Key 설정 */}
+      <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ padding: "12px 16px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>🔑 Gemini API 키 설정</span>
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"
+            style={{ fontSize: 11, color: C.infoTx, textDecoration: "none", marginLeft: "auto", padding: "2px 8px", borderRadius: 4, background: C.info }}>
+            API 키 발급받기 →
+          </a>
+        </div>
+        <div style={{ padding: "14px 16px" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <input
+              type={showKey ? "text" : "password"}
+              placeholder="Google AI Studio API 키를 여기에 붙여넣으세요 (AIza...)"
+              value={apiKey}
+              onChange={(e) => saveKey(e.target.value)}
+              style={{ flex: 1, fontSize: 13, padding: "8px 12px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${apiKey ? "#1D9E75" : C.bdS}`, background: C.bg, color: C.tx, fontFamily: "var(--font-mono)" }}
+            />
+            <Btn small onClick={() => setShowKey((p) => !p)}>{showKey ? "숨기기" : "보기"}</Btn>
+            {apiKey && <span style={{ fontSize: 11, color: "#1D9E75", whiteSpace: "nowrap" }}>✓ 입력됨</span>}
+          </div>
+          <div style={{ fontSize: 11, color: C.txS, lineHeight: 1.6 }}>
+            API 키는 브라우저 세션에만 임시 저장되며 외부로 전송되지 않습니다. 분석 요청 시 Google Gemini API로만 전달됩니다.
+          </div>
+        </div>
+      </div>
+
+      {/* 분석 설정 */}
+      <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ padding: "12px 16px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}` }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>📋 분석 설정</span>
+        </div>
+        <div style={{ padding: 16 }}>
+          {/* 파일 선택 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: C.txS, marginBottom: 6, fontWeight: 500 }}>분석 대상 파일</div>
+            <select value={selId} onChange={(e) => setSelId(e.target.value)}
+              style={{ width: "100%", fontSize: 13, padding: "7px 10px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }}>
+              {datasets.map((d) => <option key={d.id} value={d.id}>{d.name} — {d.rowCount.toLocaleString()}행 × {d.columns.length}열</option>)}
+            </select>
+            {ds && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {ds.colMeta.slice(0, 8).map((col) => (
+                  <span key={col.name} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 4, background: TYPE_CLR[col.type]?.bg || C.bgS, color: TYPE_CLR[col.type]?.tx || C.txS, fontFamily: "var(--font-mono)" }}>{col.name}</span>
+                ))}
+                {ds.colMeta.length > 8 && <span style={{ fontSize: 11, color: C.txT }}>+{ds.colMeta.length - 8}개</span>}
+              </div>
+            )}
+          </div>
+
+          {/* 분석 유형 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: C.txS, marginBottom: 8, fontWeight: 500 }}>분석 유형 선택</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+              {ANALYSIS_TYPES.map((t) => (
+                <div key={t.id} onClick={() => setAnalysisType(t.id)}
+                  style={{ padding: "10px 12px", borderRadius: "var(--border-radius-md)", border: `${analysisType === t.id ? "2px solid #185FA5" : `0.5px solid ${C.bd}`}`, cursor: "pointer", background: analysisType === t.id ? "#E6F1FB" : C.bg, transition: "all 0.1s" }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: analysisType === t.id ? "#185FA5" : C.tx, marginBottom: 2 }}>{t.icon} {t.label}</div>
+                  <div style={{ fontSize: 11, color: C.txS }}>{t.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 직접 질문 입력 */}
+          {analysisType === "custom" && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: C.txS, marginBottom: 6, fontWeight: 500 }}>질문 입력</div>
+              <textarea
+                placeholder={"예시:\n- 매출과 가장 관련이 깊은 컬럼은 무엇인가요?\n- 이 데이터에서 이상치가 의심되는 행을 찾아주세요.\n- 연령대별 구매 패턴을 분석해 주세요."}
+                value={customQ} onChange={(e) => setCustomQ(e.target.value)}
+                rows={4}
+                style={{ width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: "var(--border-radius-md)", border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx, resize: "vertical", boxSizing: "border-box", lineHeight: 1.6 }}
+              />
+            </div>
+          )}
+
+          {/* 전송 정보 안내 */}
+          {ds && (
+            <div style={{ background: C.bgS, borderRadius: "var(--border-radius-md)", padding: "10px 12px", marginBottom: 14, fontSize: 11, color: C.txS, lineHeight: 1.6 }}>
+              📤 Gemini에 전송되는 정보: 컬럼 통계 요약 + 샘플 최대 100행 ({Math.min(100, ds.rowCount)}행 전송 예정)
+              <br />전체 {ds.rowCount.toLocaleString()}행 중 토큰을 절약하기 위해 샘플만 전송합니다.
+            </div>
+          )}
+
+          {error && <div style={{ fontSize: 12, color: "#A32D2D", background: "#FCEBEB", padding: "8px 12px", borderRadius: "var(--border-radius-md)", marginBottom: 12 }}>{error}</div>}
+
+          <Btn variant="primary" onClick={handleRun} disabled={loading || !apiKey || !ds}>
+            {loading ? "Gemini 분석 중..." : "✨ Gemini로 EDA 분석 시작"}
+          </Btn>
+        </div>
+      </div>
+
+      {/* 로딩 */}
+      {loading && (
+        <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", padding: "32px 24px", textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 20, marginBottom: 12 }}>✨</div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: C.tx, marginBottom: 6 }}>Gemini가 데이터를 분석하고 있습니다...</div>
+          <div style={{ fontSize: 12, color: C.txS }}>데이터 규모에 따라 5~20초 정도 소요될 수 있습니다</div>
+        </div>
+      )}
+
+      {/* 결과 목록 */}
+      {results.map((r) => (
+        <div key={r.id} style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 16 }}>
+          <div style={{ padding: "12px 16px", background: "#E6F1FB", borderBottom: `0.5px solid ${C.bd}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#185FA5", color: "#fff", fontWeight: 500 }}>Gemini</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#0C447C" }}>{r.type}</span>
+              <span style={{ fontSize: 12, color: "#185FA5" }}>— {r.dsName}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: "#378ADD" }}>{r.ts}</span>
+              <Btn small onClick={() => { navigator.clipboard.writeText(r.result); }}>복사</Btn>
+              <Btn small onClick={() => setResults((p) => p.filter((x) => x.id !== r.id))}>제거</Btn>
+            </div>
+          </div>
+          {r.type === "직접 질문" && (
+            <div style={{ padding: "10px 16px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`, fontSize: 12, color: C.txS }}>
+              Q: {r.question}
+            </div>
+          )}
+          <div style={{ padding: "16px 20px", maxHeight: 600, overflowY: "auto" }}>
+            <MdBlock text={r.result} />
+          </div>
+        </div>
+      ))}
+
+      {results.length === 0 && !loading && (
+        <div style={{ textAlign: "center", padding: "40px 24px", color: C.txT, fontSize: 13, border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)" }}>
+          API 키를 입력하고 분석 유형을 선택한 후 버튼을 눌러 주세요.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+export default function DataStudio() {
+  const [datasets, setDatasets] = useState([]);
+  const [mergeResults, setMergeResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [activeTab, setActiveTab] = useState("files");
+  const inputRef = useRef();
+
+  const handleFiles = useCallback(async (files) => {
+    setLoading(true);
+    const results = [];
+    for (const file of files) {
+      try { results.push(await parseFile(file)); }
+      catch (e) { alert(`${file.name} 파싱 실패: ${e.message}`); }
+    }
+    setDatasets((prev) => [...prev, ...results]);
+    setLoading(false);
+    if (results.length) setActiveTab("files");
+  }, []);
+
+  const onDrop = useCallback((e) => {
+    e.preventDefault(); setDragOver(false);
+    const files = Array.from(e.dataTransfer.files).filter((f) => /\.(csv|xlsx|xls)$/i.test(f.name));
+    if (files.length) handleFiles(files);
+  }, [handleFiles]);
+
+  const handlePreprocessUpdate = useCallback((updated) => {
+    setDatasets((prev) => prev.map((d) => d.id === updated.id ? updated : d));
+  }, []);
+
+  const canMerge = datasets.length >= 2;
+  const canUnion = datasets.length >= 3;
+  const hasData = datasets.length > 0;
+
+  const NAV_TABS = [
+    { id: "files",      label: "파일 목록",   count: datasets.length },
+    { id: "overview",   label: "요약 정보",   disabled: !hasData },
+    { id: "preprocess", label: "전처리",      disabled: !hasData },
+    { id: "viz",        label: "📊 시각화",   disabled: !hasData },
+    { id: "eda",        label: "✨ EDA 분석", disabled: !hasData },
+    { id: "merge",      label: "Merge",       disabled: !canMerge, hint: "2개+" },
+    { id: "union",      label: "Union",       disabled: !canUnion, hint: "3개+" },
+    { id: "results",    label: "결과",        count: mergeResults.length },
+  ];
+
+  return (
+    <div style={{ maxWidth: 920, margin: "0 auto", padding: "2rem 1rem", fontFamily: "var(--font-sans)" }}>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 500, color: C.tx, margin: "0 0 5px" }}>Data Studio</h1>
+        <p style={{ fontSize: 14, color: C.txS, margin: 0 }}>CSV / Excel 업로드 · 전처리 · Merge · Union · 분석</p>
+      </div>
+
+      <div onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onClick={() => inputRef.current?.click()}
+        style={{ border: `1.5px dashed ${dragOver ? C.infoTx : C.bdS}`, borderRadius: "var(--border-radius-lg)", padding: "26px 24px", textAlign: "center", cursor: "pointer", background: dragOver ? C.info : C.bgS, transition: "all 0.15s", marginBottom: 20 }}>
+        <input ref={inputRef} type="file" multiple accept=".csv,.xlsx,.xls" onChange={(e) => { handleFiles(Array.from(e.target.files)); e.target.value = ""; }} style={{ display: "none" }} />
+        <div style={{ fontSize: 22, marginBottom: 8 }}>📂</div>
+        <div style={{ fontSize: 14, fontWeight: 500, color: C.tx, marginBottom: 4 }}>파일을 드래그하거나 클릭하여 업로드</div>
+        <div style={{ fontSize: 12, color: C.txS }}>CSV · Excel (.xlsx, .xls) · 여러 파일 동시 가능</div>
+      </div>
+
+      {loading && <div style={{ textAlign: "center", padding: 16, color: C.txS, fontSize: 14 }}>파일 분석 중...</div>}
+
+      {hasData && (
+        <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: `0.5px solid ${C.bd}` }}>
+          {NAV_TABS.map((t) => (
+            <button key={t.id} onClick={() => !t.disabled && setActiveTab(t.id)} disabled={t.disabled}
+              style={{ fontSize: 13, padding: "9px 14px", cursor: t.disabled ? "not-allowed" : "pointer", background: "transparent", border: "none", borderBottom: activeTab === t.id ? `2px solid ${C.infoTx}` : "2px solid transparent", color: t.disabled ? C.txT : activeTab === t.id ? C.infoTx : C.txS, fontWeight: activeTab === t.id ? 500 : 400, display: "flex", alignItems: "center", gap: 5, marginBottom: -0.5, opacity: t.disabled ? 0.4 : 1 }}>
+              {t.label}
+              {t.hint && <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: C.bgS, color: C.txT }}>{t.hint}</span>}
+              {t.count !== undefined && t.count > 0 && <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 10, background: activeTab === t.id ? C.info : C.bgS, color: activeTab === t.id ? C.infoTx : C.txS }}>{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!hasData && !loading && (
+        <div style={{ textAlign: "center", padding: "48px 24px", color: C.txT, fontSize: 14, border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)" }}>
+          업로드된 파일이 없습니다. 위 영역에 파일을 업로드해 주세요.
+        </div>
+      )}
+
+      {activeTab === "files" && datasets.map((ds, i) => (
+        <FileCard key={ds.id} dataset={ds} isMergeResult={false} onRemove={() => setDatasets((p) => p.filter((_, idx) => idx !== i))} />
+      ))}
+
+      {activeTab === "overview" && hasData && <OverviewTab datasets={datasets} />}
+
+      {activeTab === "preprocess" && hasData && (
+        <PreprocessTab datasets={datasets} onUpdate={handlePreprocessUpdate} />
+      )}
+
+      {activeTab === "viz" && hasData && (
+        <VizTab datasets={datasets} mergeResults={mergeResults} />
+      )}
+
+      {activeTab === "eda" && hasData && (
+        <EDATab datasets={[...datasets, ...mergeResults]} />
+      )}
+
+      {activeTab === "merge" && canMerge && (
+        <MergePanel datasets={datasets} onResult={(r) => { setMergeResults((p) => [...p, r]); setActiveTab("results"); }} />
+      )}
+
+      {activeTab === "union" && canUnion && (
+        <UnionPanel datasets={datasets} onResult={(r) => { setMergeResults((p) => [...p, r]); setActiveTab("results"); }} />
+      )}
+
+      {activeTab === "results" && (
+        mergeResults.length === 0
+          ? <div style={{ textAlign: "center", padding: "48px", color: C.txT, fontSize: 14, border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)" }}>아직 결합 결과가 없습니다. Merge 또는 Union을 실행해 주세요.</div>
+          : mergeResults.map((ds, i) => <FileCard key={ds.id} dataset={ds} isMergeResult onRemove={() => setMergeResults((p) => p.filter((_, idx) => idx !== i))} />)
+      )}
+    </div>
+  );
+}
