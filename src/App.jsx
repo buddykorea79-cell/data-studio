@@ -1,121 +1,99 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useRef, useCallback, useMemo } from "react";
+import { C } from "./constants";
+import { parseFile } from "./utils/dataUtils";
+import { FileCard } from "./components/FileCard";
+import { MergePanel, UnionPanel } from "./components/MergeUnion";
+import { DataInfoTab } from "./components/DataInfoTab";
+import { SummaryTab } from "./components/SummaryTab";
+import { PreprocessTab } from "./components/PreprocessTab";
+import { VizTab } from "./components/VizTab";
+import { EDATab } from "./components/EDATab";
+import { MLTab } from "./components/MLTab";
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function DataStudio(){
+  const [datasets,setDatasets]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [dragOver,setDragOver]=useState(false);
+  const [activeTab,setActiveTab]=useState("merge");
+  const [summaryResults,setSummaryResults]=useState([]);
+  const inputRef=useRef();
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+  const handleFiles=useCallback(async(files)=>{
+    setLoading(true);const results=[];
+    for(const file of files){try{results.push(await parseFile(file));}catch(e){alert(`${file.name} 파싱 실패: ${e.message}`);}}
+    setDatasets(prev=>[...prev,...results]);setLoading(false);
+    if(results.length)setActiveTab("merge");
+  },[]);
 
-      <div className="ticks"></div>
+  const onDrop=useCallback(e=>{
+    e.preventDefault();setDragOver(false);
+    const files=Array.from(e.dataTransfer.files).filter(f=>/\.(csv|xlsx|xls)$/i.test(f.name));
+    if(files.length)handleFiles(files);
+  },[handleFiles]);
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  const allDs=useMemo(()=>[...datasets,...summaryResults],[datasets,summaryResults]);
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+  const handleUpdate=useCallback((updated,mode)=>{
+    if(mode==="add"){setDatasets(p=>[...p,updated]);}
+    else{setDatasets(p=>p.map(d=>d.id===updated.id?updated:d));}
+  },[]);
+
+  const hasData=datasets.length>0;
+
+  const NAV_TABS=[
+    {id:"merge",   label:"Merge / Union"},
+    {id:"files",   label:"파일 목록",   count:allDs.length},
+    {id:"info",    label:"Data Info",   disabled:!hasData},
+    {id:"summary", label:"데이터 요약", disabled:!hasData},
+    {id:"prep",    label:"전처리",      disabled:!hasData},
+    {id:"viz",     label:"📊 시각화",   disabled:!hasData},
+    {id:"eda",     label:"✨ EDA",      disabled:!hasData},
+    {id:"ml",      label:"🤖 ML/DL",   disabled:!hasData},
+  ];
+
+  return<div style={{maxWidth:960,margin:"0 auto",padding:"1.5rem 1rem",fontFamily:"var(--font-sans)"}}>
+    <div style={{marginBottom:20}}>
+      <h1 style={{fontSize:22,fontWeight:500,color:C.tx,margin:"0 0 4px"}}>Data Studio</h1>
+      <p style={{fontSize:13,color:C.txS,margin:0}}>CSV / Excel · Merge · Union · 전처리 · 요약 · 시각화 · EDA · ML/DL</p>
+    </div>
+
+    {/* Upload */}
+    <div onDrop={onDrop} onDragOver={e=>{e.preventDefault();setDragOver(true);}} onDragLeave={()=>setDragOver(false)} onClick={()=>inputRef.current?.click()}
+      style={{border:`1.5px dashed ${dragOver?C.infoTx:C.bdS}`,borderRadius:"var(--border-radius-lg)",padding:"22px 20px",textAlign:"center",cursor:"pointer",background:dragOver?C.info:C.bgS,transition:"all 0.15s",marginBottom:18}}>
+      <input ref={inputRef} type="file" multiple accept=".csv,.xlsx,.xls" onChange={e=>{handleFiles(Array.from(e.target.files));e.target.value="";}} style={{display:"none"}}/>
+      <div style={{fontSize:20,marginBottom:6}}>📂</div>
+      <div style={{fontSize:14,fontWeight:500,color:C.tx,marginBottom:3}}>파일을 드래그하거나 클릭하여 업로드</div>
+      <div style={{fontSize:12,color:C.txS}}>CSV · Excel (.xlsx, .xls) · 여러 파일 동시 가능</div>
+    </div>
+
+    {loading&&<div style={{textAlign:"center",padding:14,color:C.txS,fontSize:14}}>파일 분석 중...</div>}
+
+    {/* Nav */}
+    <div style={{display:"flex",gap:0,marginBottom:18,borderBottom:`0.5px solid ${C.bd}`,overflowX:"auto"}}>
+      {NAV_TABS.map(t=><button key={t.id} onClick={()=>!t.disabled&&setActiveTab(t.id)} disabled={t.disabled}
+        style={{fontSize:13,padding:"9px 12px",cursor:t.disabled?"not-allowed":"pointer",background:"transparent",border:"none",borderBottom:activeTab===t.id?`2px solid ${C.infoTx}`:"2px solid transparent",color:t.disabled?C.txT:activeTab===t.id?C.infoTx:C.txS,fontWeight:activeTab===t.id?500:400,display:"flex",alignItems:"center",gap:5,marginBottom:-0.5,opacity:t.disabled?0.4:1,whiteSpace:"nowrap"}}>
+        {t.label}
+        {t.count!==undefined&&t.count>0&&<span style={{fontSize:11,padding:"1px 6px",borderRadius:10,background:activeTab===t.id?C.info:C.bgS,color:activeTab===t.id?C.infoTx:C.txS}}>{t.count}</span>}
+      </button>)}
+    </div>
+
+    {/* Empty */}
+    {!hasData&&!loading&&activeTab!=="merge"&&<div style={{textAlign:"center",padding:"48px 24px",color:C.txT,fontSize:14,border:`0.5px solid ${C.bd}`,borderRadius:"var(--border-radius-lg)"}}>파일을 업로드해 주세요.</div>}
+
+    {/* Merge / Union */}
+    {activeTab==="merge"&&<div>
+      {datasets.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.txT,fontSize:13,border:`0.5px solid ${C.bd}`,borderRadius:"var(--border-radius-lg)",marginBottom:14}}>파일을 업로드하면 Merge / Union을 진행할 수 있습니다.</div>}
+      {datasets.length===1&&<div style={{marginBottom:14}}><div style={{padding:"12px 16px",background:C.info,borderRadius:"var(--border-radius-md)",fontSize:13,color:C.infoTx,marginBottom:10}}>파일 1개 업로드됨 — 파일을 추가해 Merge / Union을 진행하세요.</div><FileCard dataset={datasets[0]} isMergeResult={false} onRemove={()=>setDatasets([])}/></div>}
+      {datasets.length>=2&&<MergePanel datasets={datasets} onResult={r=>{setDatasets(p=>[...p,r]);setActiveTab("files");}}/>}
+      {datasets.length>=2&&<UnionPanel datasets={datasets} onResult={r=>{setDatasets(p=>[...p,r]);setActiveTab("files");}}/>}
+    </div>}
+
+    {activeTab==="files"&&allDs.map((ds,i)=><FileCard key={ds.id} dataset={ds} isMergeResult={!!ds.isMerged} onRemove={()=>{setDatasets(p=>p.filter(d=>d.id!==ds.id));setSummaryResults(p=>p.filter(d=>d.id!==ds.id));}}/>)}
+    {activeTab==="info"&&hasData&&<DataInfoTab datasets={allDs} onUpdate={handleUpdate}/>}
+    {activeTab==="summary"&&hasData&&<SummaryTab datasets={allDs} onResult={r=>{setSummaryResults(p=>[...p,r]);}}/>}
+    {activeTab==="prep"&&hasData&&<PreprocessTab datasets={datasets} onUpdate={d=>setDatasets(p=>p.map(x=>x.id===d.id?d:x))}/>}
+    {activeTab==="viz"&&hasData&&<VizTab allDs={allDs}/>}
+    {activeTab==="eda"&&hasData&&<EDATab allDs={allDs} summaryResults={summaryResults}/>}
+    {activeTab==="ml"&&hasData&&<MLTab allDs={allDs} apiKey={sessionStorage.getItem("gemini_key")||""}/>}
+  </div>;
 }
-
-export default App
