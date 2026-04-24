@@ -230,8 +230,9 @@ export function mlp(X, y, classes, hiddenSizes = [16, 8], lr = 0.05, epochs = 30
 }
 
 // ── Gemini API call ───────────────────────────────────────────────────────────
+// 🚨 모델명을 현재 서비스 중인 최신 경량 모델(gemini-3.1-flash-lite-preview)로 변경
 export async function callGemini(apiKey, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
