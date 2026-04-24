@@ -295,7 +295,8 @@ export function MLTab({ allDs, apiKey }) {
   const [modelId, setModelId] = useState("");
   const [targetCol, setTargetCol] = useState("");
   const [featureCols, setFeatureCols] = useState([]);
-  const [kClusters, setKClusters] = useState(3);
+  const [kClusters, setKClusters] = useState(null);  // null = 아직 미선택
+  const [elbowPreview, setElbowPreview] = useState(null); // 미리 계산된 엘보우
   const [showAdv, setShowAdv] = useState(false);
   const [testRatio, setTestRatio] = useState(0.2);
   const [hiddenLayer, setHiddenLayer] = useState("16,8");
@@ -324,6 +325,7 @@ export function MLTab({ allDs, apiKey }) {
     setTask(t); setResult(null); setGeminiText(""); setError("");
     const defaults = { regression:"linear", classification:"logistic", clustering:"kmeans", timeseries:"ma" };
     setModelId(defaults[t] || "");
+    setElbowPreview(null); setKClusters(null);
     if (!ds) { setStep(2); return; }
     if (t === "clustering") {
       setFeatureCols(numCols.slice(0, 5)); setTargetCol("");
@@ -517,18 +519,13 @@ export function MLTab({ allDs, apiKey }) {
 
         // ── 군집화
         } else if (task === "clustering") {
+          if (!kClusters) { setError("K 값을 선택해 주세요. 먼저 엘보우 곡선을 확인하세요."); setRunning(false); return; }
           const k = Math.max(2, Math.min(kClusters, 10));
           const { labels, sizes, losses } = kmeans(X, k);
           const rowsWithCluster = ds.rows.slice(0, X.length).map((r, i) => ({ ...r, _cluster: String(labels[i]) }));
-          const elbowData = [];
-          for (let ki = 2; ki <= Math.min(8, X.length - 1); ki++) {
-            const res = kmeans(X, ki, 50);
-            const inertia = X.reduce((s, xi, i) =>
-              s + xi.reduce((ss, v, j) => ss + (v - res.centroids[res.labels[i]][j]) ** 2, 0), 0);
-            elbowData.push({ k: ki, inertia: +inertia.toFixed(1) });
-          }
           setResult({ task: "clustering", k, sizes, losses, rowsWithCluster,
-            vizX: featureCols[0], vizY: featureCols[1] || featureCols[0], elbowData });
+            vizX: featureCols[0], vizY: featureCols[1] || featureCols[0],
+            elbowData: elbowPreview || [] });
         }
 
         setStep(3);
@@ -738,24 +735,72 @@ export function MLTab({ allDs, apiKey }) {
             </div>
           </Section>
 
-          {/* 군집화 K */}
-          {task === "clustering" && (
-            <Section title="몇 개 그룹으로 나눌까요?">
-              <div style={{ display:"flex", gap:8 }}>
-                {[2,3,4,5,6].map(k => (
-                  <div key={k} onClick={() => setKClusters(k)} style={{
-                    padding:"10px 16px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
-                    background: kClusters===k ? "#E6F1FB" : C.bgS,
-                    color: kClusters===k ? "#185FA5" : C.tx,
-                    fontSize:15, fontWeight: kClusters===k ? 700 : 400,
-                    border: (kClusters===k?"2px":"1px") + " solid " + (kClusters===k?"#185FA5":C.bdS),
-                    textAlign:"center", minWidth:52, transition:"all 0.1s",
-                  }}>
-                    <div>{k}</div>
-                    <div style={{ fontSize:10, color:kClusters===k?"#185FA5":C.txS }}>그룹</div>
+          {/* 군집화: 엘보우 계산 → K 선택 */}
+          {task === "clustering" && featureCols.length > 0 && (
+            <Section title="📐 최적 K 값 찾기 (엘보우 곡선)" desc="피처 컬럼 선택 후 아래 버튼을 눌러 적정 K를 확인하세요">
+              {!elbowPreview ? (
+                <div>
+                  <div style={{ fontSize:13, color:C.txS, marginBottom:12, lineHeight:1.6 }}>
+                    엘보우 곡선은 K(클러스터 수)에 따른 응집도 변화를 보여줍니다.<br/>
+                    <strong>꺾이는 지점</strong>이 최적 K입니다.
                   </div>
-                ))}
-              </div>
+                  <button onClick={() => {
+                    const { X } = prepareFeatures(ds, featureCols, null);
+                    if (X.length < 4) return;
+                    const eData = [];
+                    for (let ki=2; ki<=Math.min(8,X.length-1); ki++) {
+                      const res = kmeans(X, ki, 50);
+                      const inertia = X.reduce((s,xi,i) =>
+                        s+xi.reduce((ss,v,j)=>ss+(v-res.centroids[res.labels[i]][j])**2,0),0);
+                      eData.push({ k:ki, inertia:+inertia.toFixed(1) });
+                    }
+                    setElbowPreview(eData);
+                  }} style={{
+                    padding:"10px 20px", fontSize:13, fontWeight:600, cursor:"pointer",
+                    borderRadius:"var(--border-radius-md)", border:"1.5px solid #185FA5",
+                    background:"#E6F1FB", color:"#185FA5",
+                  }}>
+                    🔍 엘보우 곡선 계산하기
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={elbowPreview} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.bd}/>
+                      <XAxis dataKey="k" tick={{ fontSize:10, fill:C.txS }} tickFormatter={v=>Number.isInteger(v)?v:Math.round(v)} label={{ value:"K (클러스터 수)", position:"insideBottom", offset:-2, fontSize:10, fill:C.txS }}/>
+                      <YAxis tick={{ fontSize:10, fill:C.txS }} width={60} tickFormatter={v=>v>=1000?Math.round(v/100)*100:Math.round(v)}/>
+                      <Tooltip contentStyle={{ fontSize:11, borderRadius:6, border:"0.5px solid "+C.bd }} formatter={v=>[+v.toFixed(1),"Inertia"]}/>
+                      <Line type="monotone" dataKey="inertia" stroke="#D85A30" strokeWidth={2} dot={{ r:5, fill:"#D85A30" }} name="Inertia"/>
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div style={{ marginTop:12, fontSize:12, color:C.txS, marginBottom:8 }}>
+                    꺾이는 지점의 K를 선택하세요
+                  </div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                    {elbowPreview.map(({ k }) => (
+                      <div key={k} onClick={() => setKClusters(k)} style={{
+                        padding:"10px 18px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+                        background: kClusters===k ? "#E6F1FB" : C.bgS,
+                        color: kClusters===k ? "#185FA5" : C.tx,
+                        fontSize:16, fontWeight: kClusters===k ? 700 : 400,
+                        border: (kClusters===k?"2px":"1px") + " solid " + (kClusters===k?"#185FA5":C.bdS),
+                        textAlign:"center", minWidth:56, transition:"all 0.1s",
+                        boxShadow: kClusters===k ? "0 2px 8px rgba(24,95,165,0.25)" : "none",
+                      }}>
+                        <div>K={k}</div>
+                        {kClusters===k && <div style={{ fontSize:10, color:"#185FA5", marginTop:2 }}>✓ 선택됨</div>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop:8 }}>
+                    <button onClick={() => { setElbowPreview(null); setKClusters(null); }}
+                      style={{ fontSize:11, color:C.txS, background:"transparent", border:"none", cursor:"pointer", padding:0 }}>
+                      ↺ 다시 계산
+                    </button>
+                  </div>
+                </div>
+              )}
             </Section>
           )}
 

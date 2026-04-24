@@ -182,8 +182,8 @@ function CustomHistChart({ ds, col, hueCol, chartH=1, autoAxis=false }) {
       <ResponsiveContainer width="100%" height={h1}>
         <BarChart data={counts} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
-          <XAxis dataKey="x" tick={{ fontSize: 10, fill: C.txS }} label={{ value: col, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
-          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDomain} />
+          <XAxis dataKey="x" tick={{ fontSize: 10, fill: C.txS }} tickFormatter={v => Number.isInteger(v)?v:+v.toFixed(1)} label={{ value: col, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
+          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDomain} tickFormatter={v => Number.isInteger(v)?v:Math.round(v)} />
           <Tooltip formatter={v => [v, "빈도"]} contentStyle={{ fontSize: 11, borderRadius: 6, border: "0.5px solid " + C.bd }} />
           <Bar dataKey="count" fill="#378ADD" radius={[2, 2, 0, 0]} />
         </BarChart>
@@ -235,8 +235,8 @@ function CustomScatterChart({ ds, xCol, yCol, hueCol, chartH=1, autoAxis=false }
       <ResponsiveContainer width="100%" height={scatH}>
         <ScatterChart margin={{ top: 4, right: 8, left: 0, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
-          <XAxis type="number" dataKey="x" name={xCol} tick={{ fontSize: 10, fill: C.txS }} domain={xDom} label={{ value: xCol, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
-          <YAxis type="number" dataKey="y" name={yCol} tick={{ fontSize: 10, fill: C.txS }} domain={yDom} />
+          <XAxis type="number" dataKey="x" name={xCol} tick={{ fontSize: 10, fill: C.txS }} domain={xDom} tickFormatter={v=>Number.isInteger(v)?v:+v.toFixed(1)} label={{ value: xCol, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
+          <YAxis type="number" dataKey="y" name={yCol} tick={{ fontSize: 10, fill: C.txS }} domain={yDom} tickFormatter={v=>Number.isInteger(v)?v:+v.toFixed(1)} />
           <Tooltip content={({ payload }) => payload?.length ? <div style={{ background: C.bg, border: `0.5px solid ${C.bd}`, borderRadius: 6, padding: "5px 8px", fontSize: 11 }}>{hueCol && <div>{hueCol}: {payload[0]?.payload?.hue}</div>}<div>{xCol}: {payload[0]?.payload?.x}</div><div>{yCol}: {payload[0]?.payload?.y}</div></div> : null} />
           {hueVals.map((hv, i) => <Scatter key={hv} name={hv === "all" ? `${xCol} × ${yCol}` : hv} data={getRows(hv).map(p => ({ ...p, hue: hv }))} fill={PALETTE[i % PALETTE.length]} fillOpacity={0.55} r={3} />)}
           {hueCol && <Legend wrapperStyle={{ fontSize: 11 }} />}
@@ -258,7 +258,7 @@ function CustomLineChart({ ds, xCol, yCol, hueCol, chartH=1, autoAxis=false }) {
         <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
           <XAxis dataKey="x" tick={{ fontSize: 10, fill: C.txS }} interval="preserveStartEnd" label={{ value: xCol, position: "insideBottom", offset: -16, fontSize: 10, fill: C.txS }} />
-          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDom2} />
+          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDom2} tickFormatter={v=>Number.isInteger(v)?v:+v.toFixed(1)} />
           <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
           <Line type="monotone" dataKey="y" name={yCol} stroke="#185FA5" dot={false} strokeWidth={2} />
         </LineChart>
@@ -290,7 +290,7 @@ function CustomLineChart({ ds, xCol, yCol, hueCol, chartH=1, autoAxis=false }) {
   );
 }
 
-function CustomBoxPlot({ ds, col, groupCol, chartH=1 }) {
+function CustomBoxPlot({ ds, col, groupCol, chartH=1, autoAxis=false }) {
   const calcBox = vals => {
     if (!vals.length) return null;
     const s = [...vals].sort((a, b) => a - b);
@@ -300,36 +300,80 @@ function CustomBoxPlot({ ds, col, groupCol, chartH=1 }) {
     const iqr = q3 - q1;
     const lo = Math.max(s[0], q1 - 1.5 * iqr);
     const hi = Math.min(s[s.length - 1], q3 + 1.5 * iqr);
-    return { lo, q1, median, q3, hi, min: s[0], max: s[s.length - 1] };
+    return { lo, q1, median, q3, hi };
   };
   const groups = groupCol
     ? [...new Set(ds.rows.map(r => String(r[groupCol] ?? "")))].slice(0, 12)
     : ["전체"];
-  const data = groups.map(g => {
-    const vals = ds.rows.filter(r => !groupCol || String(r[groupCol] ?? "") === g).map(r => parseFloat(r[col])).filter(v => !isNaN(v));
+  // 원본 absolute 값 보존
+  const boxData = groups.map(g => {
+    const vals = ds.rows
+      .filter(r => !groupCol || String(r[groupCol] ?? "") === g)
+      .map(r => parseFloat(r[col])).filter(v => !isNaN(v));
     const box = calcBox(vals);
     if (!box) return null;
-    return { name: g, lo: +box.lo.toFixed(3), q1: +(box.q1 - box.lo).toFixed(3), med: +(box.median - box.q1).toFixed(3), q3: +(box.q3 - box.median).toFixed(3), hi: +(box.hi - box.q3).toFixed(3), _q1: box.q1, _med: box.median, _q3: box.q3, _lo: box.lo, _hi: box.hi };
+    return { name: g, _lo: box.lo, _q1: box.q1, _med: box.median, _q3: box.q3, _hi: box.hi };
   }).filter(Boolean);
-  if (!data.length) return <NoData />;
+  if (!boxData.length) return <NoData />;
+
+  // XAxis domain: autoAxis=true면 실제값 범위, false면 0 기준
+  const allAbsVals = boxData.flatMap(d => [d._lo, d._hi]);
+  const domainMin = autoAxis ? +Math.min(...allAbsVals).toFixed(2) : 0;
+  const domainMax = +(Math.max(...allAbsVals) * 1.05).toFixed(2);
+
+  // 스택 바 데이터: lo(투명 오프셋) + q1구간 + med구간 + q3구간 + hi구간(투명)
+  const stackData = boxData.map(d => ({
+    name: d.name,
+    _lo: d._lo, _q1: d._q1, _med: d._med, _q3: d._q3, _hi: d._hi,
+    offset: d._lo - domainMin,          // 투명 시작 오프셋
+    q1span: d._q1 - d._lo,             // Q1 ~ lo 구간
+    medspan: d._med - d._q1,           // median ~ Q1 구간
+    q3span: d._q3 - d._med,            // Q3 ~ median 구간
+    hispan: d._hi - d._q3,             // hi ~ Q3 구간
+  }));
+
+  const h = Math.round(Math.max(220, boxData.length * 52) * chartH);
+  const tickFmt = v => {
+    const n = domainMin + v;
+    return Number.isInteger(n) ? n : +n.toFixed(1);
+  };
+
   return (
     <div>
-      <div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>박스: Q1~Q3 범위 · 선: 중앙값 · 수염: 1.5×IQR</div>
-      <ResponsiveContainer width="100%" height={Math.round(Math.max(220, data.length * 36) * chartH)}>
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
+      <div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>
+        박스: Q1~Q3 범위 · 짙은선: 중앙값 · 수염: 최솟값~최댓값 (1.5×IQR 클리핑)
+        {autoAxis && <span style={{ marginLeft:8, color:C.infoTx }}>· 실제값 축 표시 중</span>}
+      </div>
+      <ResponsiveContainer width="100%" height={h}>
+        <BarChart data={stackData} layout="vertical"
+          margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }}
-            domain={autoAxis ? (() => {
-              const allVals = data.flatMap(d => [d._lo, d._hi]).filter(v => v != null);
-              return allVals.length ? [Math.min(...allVals)*0.95, Math.max(...allVals)*1.05] : [0, "auto"];
-            })() : [0, "auto"]} />
+            tickFormatter={v => {
+              const actual = domainMin + v;
+              return Number.isInteger(actual) ? actual : +actual.toFixed(1);
+            }}
+            domain={[0, domainMax - domainMin]} />
           <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={80} />
-          <Tooltip content={({ payload, label }) => payload?.length ? <div style={{ background: C.bg, border: `0.5px solid ${C.bd}`, borderRadius: 6, padding: "7px 10px", fontSize: 11 }}><div style={{ fontWeight: 500, marginBottom: 4 }}>{label}</div><div>최솟값: {payload[0]?.payload?._lo}</div><div>Q1: {payload[0]?.payload?._q1}</div><div>중앙값: {payload[0]?.payload?._med}</div><div>Q3: {payload[0]?.payload?._q3}</div><div>최댓값: {payload[0]?.payload?._hi}</div></div> : null} />
-          <Bar dataKey="lo" stackId="box" fill="transparent" />
-          <Bar dataKey="q1" stackId="box" fill="#B5D4F4" name="Q1-Q3" />
-          <Bar dataKey="med" stackId="box" fill="#185FA5" name="중앙값" />
-          <Bar dataKey="q3" stackId="box" fill="#B5D4F4" />
-          <Bar dataKey="hi" stackId="box" fill="transparent" />
+          <Tooltip content={({ payload, label }) => {
+            if (!payload?.length) return null;
+            const d = payload[0]?.payload;
+            return (
+              <div style={{ background: C.bg, border: "0.5px solid "+C.bd, borderRadius: 6, padding: "7px 10px", fontSize: 11 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                <div>최솟값: <strong>{+d._lo.toFixed(3)}</strong></div>
+                <div>Q1: <strong>{+d._q1.toFixed(3)}</strong></div>
+                <div>중앙값: <strong>{+d._med.toFixed(3)}</strong></div>
+                <div>Q3: <strong>{+d._q3.toFixed(3)}</strong></div>
+                <div>최댓값: <strong>{+d._hi.toFixed(3)}</strong></div>
+              </div>
+            );
+          }} />
+          <Bar dataKey="offset"  stackId="box" fill="transparent" isAnimationActive={false} />
+          <Bar dataKey="q1span"  stackId="box" fill="#B5D4F4"    isAnimationActive={false} />
+          <Bar dataKey="medspan" stackId="box" fill="#185FA5"    isAnimationActive={false} name="중앙값 구간" />
+          <Bar dataKey="q3span"  stackId="box" fill="#B5D4F4"    isAnimationActive={false} />
+          <Bar dataKey="hispan"  stackId="box" fill="transparent" isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>
