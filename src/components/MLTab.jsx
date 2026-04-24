@@ -350,36 +350,64 @@ export function MLTab({ allDs, apiKey }) {
           if (yNum.some(isNaN)) { setError("타겟 컬럼에 숫자가 아닌 값이 있습니다."); setRunning(false); return; }
           const norm = normalize(yNum);
           const { XTr, yTr, XTe, yTe } = trainTestSplit(X, norm.scaled, testRatio);
-          const model = linearRegression(XTr, yTr);
-          const testPreds = XTe.map(xi => denorm(xi.reduce((s,v,j) => s+v*model.w[j], model.b), norm.min, norm.range));
+          // 모델별 분기
+          let model;
+          if (modelId === "ridge") {
+            const rn=XTr.length,rm=XTr[0].length,lambda=0.1;
+            let w=new Array(rm).fill(0),b=0;const lr=0.01;const losses=[];
+            for(let ep=0;ep<800;ep++){let dw=new Array(rm).fill(0),db=0,loss=0;for(let i=0;i<rn;i++){const pred=XTr[i].reduce((s,x,j)=>s+x*w[j],b);const err=pred-yTr[i];loss+=err*err;for(let j=0;j<rm;j++)dw[j]+=err*XTr[i][j];db+=err;}for(let j=0;j<rm;j++)w[j]-=lr*(dw[j]/rn+lambda*w[j]);b-=lr*db/rn;if(ep%80===0)losses.push({epoch:ep,loss:+(loss/rn).toFixed(4)});}
+            const rPreds=XTr.map(xi=>xi.reduce((s,x,j)=>s+x*w[j],b));
+            const rssR=yTr.reduce((s,yi,i)=>s+(yi-rPreds[i])**2,0);const rssT=yTr.reduce((s,yi)=>s+(yi-yTr.reduce((a,b)=>a+b,0)/rn)**2,0);
+            model={w,b,preds:rPreds,r2:+(1-rssR/(rssT||1)).toFixed(4),rmse:+Math.sqrt(rssR/rn).toFixed(4),losses,_type:"ridge"};
+          } else if (modelId === "knn_reg") {
+            const kk=5;
+            const knnP=xi=>{const dists=XTr.map((xj,i)=>({i,d:xi.reduce((s,v,j)=>s+(v-xj[j])**2,0)})).sort((a,b)=>a.d-b.d).slice(0,kk);return dists.reduce((s,{i})=>s+yTr[i],0)/kk;};
+            const kPreds=XTr.map(knnP);const kssR=yTr.reduce((s,yi,i)=>s+(yi-kPreds[i])**2,0);const kssT=yTr.reduce((s,yi)=>s+(yi-yTr.reduce((a,b)=>a+b,0)/yTr.length)**2,0);
+            model={w:new Array(XTr[0].length).fill(0),b:0,preds:kPreds,r2:+(1-kssR/(kssT||1)).toFixed(4),rmse:+Math.sqrt(kssR/yTr.length).toFixed(4),losses:[],_predict:knnP};
+          } else {
+            model = linearRegression(XTr, yTr);
+          }
+          const testPreds = model._predict
+            ? XTe.map(model._predict)
+            : XTe.map(xi => denorm(xi.reduce((s,v,j) => s+v*model.w[j], model.b), norm.min, norm.range));
           const testActual = yTe.map(v => denorm(v, norm.min, norm.range));
           const ssRes = testActual.reduce((s,a,i) => s+(a-testPreds[i])**2, 0);
-          const ssTot = testActual.reduce((s,a) => { const m=testActual.reduce((x,b)=>x+b,0)/testActual.length; return s+(a-m)**2; }, 0);
-          const importance = allFeatNames.map((n,j) => ({ name:n, importance:+Math.abs(model.w[j]).toFixed(4) }))
-            .sort((a,b) => b.importance-a.importance);
-          setResult({ task:"regression", trainR2:model.r2, trainRmse:model.rmse,
+          const ssTot = testActual.reduce((s,a) => { const mm=testActual.reduce((x,b)=>x+b,0)/testActual.length; return s+(a-mm)**2; }, 0);
+          const importance = model.w ? allFeatNames.map((n,j) => ({ name:n, importance:+Math.abs(model.w[j]).toFixed(4) })).sort((a,b) => b.importance-a.importance) : [];
+          setResult({ task:"regression", modelId, trainR2:model.r2, trainRmse:model.rmse,
             testR2:+(1-ssRes/(ssTot||1)).toFixed(4), testRmse:+Math.sqrt(ssRes/testActual.length).toFixed(4),
             losses:model.losses, importance, testActual, testPreds, nTrain:XTr.length, nTest:XTe.length });
-
         } else if (task === "classification") {
           const classes = [...new Set(y)].sort();
           if (classes.length < 2) { setError("클래스 2개 이상 필요합니다."); setRunning(false); return; }
           if (classes.length > 20) { setError("클래스 최대 20개입니다."); setRunning(false); return; }
           const { XTr, yTr, XTe, yTe } = trainTestSplit(X, y, testRatio);
-          const model = logisticRegression(X, y, classes);
-          const trModel = logisticRegression(XTr, yTr, classes);
-          const testPreds = XTe.map(xi => {
-            const scores = classes.map(cls => ({
-              cls, score: sigmoid(xi.reduce((s,v,j) => s+v*(trModel.models[cls]?.w[j]||0), trModel.models[cls]?.b||0)),
-            }));
-            return scores.sort((a,b) => b.score-a.score)[0].cls;
-          });
-          const testAcc = +(testPreds.filter((p,i) => p===yTe[i]).length/yTe.length*100).toFixed(2);
-          const importance = allFeatNames.map((n,j) => ({ name:n, importance:model.importance[j]??0 }))
-            .sort((a,b) => b.importance-a.importance);
-          setResult({ task:"classification", trainAcc:model.acc, testAcc, classes,
-            cm:model.cm, losses:model.losses, importance, nTrain:XTr.length, nTest:XTe.length });
-
+          let allPreds, testPreds, trainAcc, lossData=[], importanceData=[];
+          const cm = {}; classes.forEach(a => { cm[a]={}; classes.forEach(b => { cm[a][b]=0; }); });
+          if (modelId === "knn_cls") {
+            const kk=5;
+            const knnP=xi=>{const dists=XTr.map((xj,i)=>({i,d:xi.reduce((s,v,j)=>s+(v-xj[j])**2,0)})).sort((a,b)=>a.d-b.d).slice(0,kk);const f={};dists.forEach(({i})=>{f[yTr[i]]=(f[yTr[i]]||0)+1;});return Object.entries(f).sort((a,b)=>b[1]-a[1])[0][0];};
+            allPreds=XTr.map(knnP); testPreds=XTe.map(knnP);
+            trainAcc=+(allPreds.filter((p,i)=>p===yTr[i]).length/yTr.length*100).toFixed(2);
+            importanceData=allFeatNames.map(n=>({name:n,importance:0}));
+          } else if (modelId === "dtree") {
+            const gini=arr=>{const n=arr.length;if(!n)return 0;const f={};arr.forEach(v=>{f[v]=(f[v]||0)+1;});return 1-Object.values(f).reduce((s,c)=>s+(c/n)**2,0);};
+            const buildTree=(rows,labels,depth=0)=>{if(depth>=4||new Set(labels).size===1||rows.length<4){const f={};labels.forEach(l=>{f[l]=(f[l]||0)+1;});return{leaf:true,cls:Object.entries(f).sort((a,b)=>b[1]-a[1])[0][0]};}let bG=-1,bF=-1,bT=0;const pG=gini(labels);for(let fi=0;fi<rows[0].length;fi++){const vals=[...new Set(rows.map(r=>r[fi]))].sort((a,b)=>a-b);for(let vi=0;vi<vals.length-1;vi++){const thresh=(vals[vi]+vals[vi+1])/2;const lI=rows.map((r,i)=>r[fi]<=thresh?i:-1).filter(i=>i>=0);const rI=rows.map((r,i)=>r[fi]>thresh?i:-1).filter(i=>i>=0);if(!lI.length||!rI.length)continue;const g=pG-(lI.length/rows.length)*gini(lI.map(i=>labels[i]))-(rI.length/rows.length)*gini(rI.map(i=>labels[i]));if(g>bG){bG=g;bF=fi;bT=thresh;}}}if(bF<0){const f={};labels.forEach(l=>{f[l]=(f[l]||0)+1;});return{leaf:true,cls:Object.entries(f).sort((a,b)=>b[1]-a[1])[0][0]};}const lI=rows.map((r,i)=>r[bF]<=bT?i:-1).filter(i=>i>=0);const rI=rows.map((r,i)=>r[bF]>bT?i:-1).filter(i=>i>=0);return{feat:bF,thresh:bT,left:buildTree(lI.map(i=>rows[i]),lI.map(i=>labels[i]),depth+1),right:buildTree(rI.map(i=>rows[i]),rI.map(i=>labels[i]),depth+1)};};
+            const predict=(tree,xi)=>{if(tree.leaf)return tree.cls;return xi[tree.feat]<=tree.thresh?predict(tree.left,xi):predict(tree.right,xi);};
+            const tree=buildTree(XTr,yTr);
+            allPreds=XTr.map(xi=>predict(tree,xi)); testPreds=XTe.map(xi=>predict(tree,xi));
+            trainAcc=+(allPreds.filter((p,i)=>p===yTr[i]).length/yTr.length*100).toFixed(2);
+            importanceData=allFeatNames.map(n=>({name:n,importance:0}));
+          } else {
+            const model=logisticRegression(X,y,classes); const trModel=logisticRegression(XTr,yTr,classes);
+            testPreds=XTe.map(xi=>{const sc=classes.map(cls=>({cls,score:sigmoid(xi.reduce((s,v,j)=>s+v*(trModel.models[cls]?.w[j]||0),trModel.models[cls]?.b||0))}));return sc.sort((a,b)=>b.score-a.score)[0].cls;});
+            allPreds=model.preds; trainAcc=model.acc; lossData=model.losses;
+            importanceData=allFeatNames.map((n,j)=>({name:n,importance:model.importance[j]??0})).sort((a,b)=>b.importance-a.importance);
+          }
+          const testAcc=+(testPreds.filter((p,i)=>p===yTe[i]).length/yTe.length*100).toFixed(2);
+          y.forEach((actual,i)=>{if(cm[actual])cm[actual][allPreds[i]]=(cm[actual][allPreds[i]]||0)+1;});
+          setResult({ task:"classification", modelId, trainAcc, testAcc, classes,
+            cm, losses:lossData, importance:importanceData, nTrain:XTr.length, nTest:XTe.length });
         } else if (task === "clustering") {
           const k = Math.max(2, Math.min(kClusters, 10));
           const { labels, sizes, losses } = kmeans(X, k);
@@ -446,6 +474,28 @@ export function MLTab({ allDs, apiKey }) {
     { id:"clustering",     icon:"🔵", label:"자동 그룹 분류", sub:"군집화 (K-Means)",         desc:"비슷한 것끼리 자동 묶기",     when:"분류 기준 없을 때" },
     { id:"neural",         icon:"🧠", label:"신경망 분류",    sub:"딥러닝 (MLP)",             desc:"복잡한 패턴 학습",            when:"분류 정확도 높이고 싶을 때" },
   ];
+  // 태스크별 사용 가능 모델
+  const MODELS = {
+    regression:     [
+      { id:"linear",  label:"선형 회귀",    desc:"빠르고 해석 쉬움" },
+      { id:"ridge",   label:"릿지 회귀",    desc:"과적합 방지 (L2)" },
+      { id:"knn_reg", label:"KNN 회귀",     desc:"가까운 이웃 평균" },
+    ],
+    classification: [
+      { id:"logistic", label:"로지스틱 회귀", desc:"빠른 분류 기준선" },
+      { id:"knn_cls",  label:"KNN 분류",      desc:"가까운 이웃 다수결" },
+      { id:"dtree",    label:"의사결정나무",  desc:"규칙 기반 해석 쉬움" },
+    ],
+    clustering: [
+      { id:"kmeans", label:"K-Means", desc:"빠른 중심 기반 군집화" },
+    ],
+    timeseries: [
+      { id:"ma",    label:"이동평균 (MA)",    desc:"단순 평균 평활화" },
+      { id:"ewm",   label:"지수가중 (EWM)",   desc:"최근 값에 가중치" },
+      { id:"trend", label:"추세 분해",        desc:"추세+잔차 분리" },
+    ],
+  };
+
 
   // ── Step indicator
   const StepBar = () => (
@@ -679,6 +729,47 @@ export function MLTab({ allDs, apiKey }) {
             {result.task === "clustering" && result.rowsWithCluster && featureCols.length >= 2 && (
               <MLScatter rows={result.rowsWithCluster} xCol={featureCols[0]} yCol={featureCols[1]}
                 labelKey="_cluster" title={"그룹 분포 (" + featureCols[0] + " × " + featureCols[1] + ")"}/>
+            )}
+            {result.task === "clustering" && result.elbowData?.length > 1 && (
+              <div style={{ marginTop:16 }}>
+                <div style={{ fontSize:12, color:C.txS, fontWeight:500, marginBottom:4 }}>📐 엘보우 곡선 (최적 K 찾기)</div>
+                <div style={{ fontSize:11, color:C.txT, marginBottom:8 }}>
+                  꺾이는 지점(팔꿈치)이 최적 K입니다. 현재 선택: <strong style={{ color:C.infoTx }}>K={result.k}</strong>
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={result.elbowData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.bd}/>
+                    <XAxis dataKey="k" tick={{ fontSize:10, fill:C.txS }} label={{ value:"K (클러스터 수)", position:"insideBottom", offset:-2, fontSize:10, fill:C.txS }}/>
+                    <YAxis tick={{ fontSize:10, fill:C.txS }} width={60} tickFormatter={v=>v.toLocaleString()}/>
+                    <Tooltip contentStyle={{ fontSize:11, borderRadius:6, border:"0.5px solid "+C.bd }} formatter={v=>[v.toLocaleString(),"Inertia"]}/>
+                    <Line type="monotone" dataKey="inertia" stroke="#D85A30" strokeWidth={2} dot={{ r:5, fill:"#D85A30" }} name="Inertia"/>
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {result.task === "timeseries" && result.chartData?.length > 0 && (
+              <div style={{ marginTop:16 }}>
+                <div style={{ fontSize:12, color:C.txS, fontWeight:500, marginBottom:4 }}>
+                  {"📈 시계열 분석 — " + result.colName}
+                  {result.modelId === "ma" && <span style={{ fontSize:11, color:C.txT, marginLeft:8 }}>{"이동평균 window=" + result.win}</span>}
+                  {result.modelId === "ewm" && <span style={{ fontSize:11, color:C.txT, marginLeft:8 }}>{"지수가중 α=" + result.alpha}</span>}
+                  {result.modelId === "trend" && <span style={{ fontSize:11, color:C.txT, marginLeft:8 }}>{"기울기=" + result.slope}</span>}
+                </div>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={result.chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.bd}/>
+                    <XAxis dataKey="i" tick={{ fontSize:10, fill:C.txS }} label={{ value:"인덱스", position:"insideBottom", offset:-2, fontSize:10, fill:C.txS }}/>
+                    <YAxis tick={{ fontSize:10, fill:C.txS }}/>
+                    <Tooltip contentStyle={{ fontSize:11, borderRadius:6, border:"0.5px solid "+C.bd }}/>
+                    <Legend wrapperStyle={{ fontSize:11 }}/>
+                    <Line type="monotone" dataKey="raw" stroke="#378ADD" dot={false} strokeWidth={1.5} name="원본" strokeOpacity={0.6}/>
+                    {result.modelId==="ma"    && <Line type="monotone" dataKey="ma"       stroke="#D85A30" dot={false} strokeWidth={2} name={"MA("+result.win+")"}/>}
+                    {result.modelId==="ewm"   && <Line type="monotone" dataKey="ewm"      stroke="#1D9E75" dot={false} strokeWidth={2} name="EWM"/>}
+                    {result.modelId==="trend" && <Line type="monotone" dataKey="trend"    stroke="#D85A30" dot={false} strokeWidth={2} name="추세선"/>}
+                    {result.modelId==="trend" && <Line type="monotone" dataKey="residual" stroke="#7F77DD" dot={false} strokeWidth={1.5} name="잔차"/>}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             )}
           </div>
 

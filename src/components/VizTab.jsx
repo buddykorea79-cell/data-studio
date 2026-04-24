@@ -92,40 +92,24 @@ function aggData(rows, col, numCol, mode) {
 
 const CL = ["label", { position: "insideRight", offset: -4, fontSize: 10, fill: "#fff" }];
 
-function CustomBarChart({ ds, col, mode, barStyle, showLabel }) {
+function CustomBarChart({ ds, col, mode, barStyle, showLabel, chartH=1, autoAxis=false }) {
   const data = aggData(ds.rows, col, mode !== "count" ? null : null, mode);
   if (!data.length) return <NoData />;
-  if (barStyle === "stacked" || barStyle === "group") {
-    const top5 = data.slice(0, 5);
-    // stacked/group by top categories: each row is a "group" col value, bars = top5 categories
-    const allCats = [...new Set(ds.rows.map(r => String(r[col] ?? "")))].slice(0, 6);
-    const pivotData = allCats.map(cat => {
-      const obj = { name: cat };
-      allCats.forEach(c2 => { obj[c2] = ds.rows.filter(r => String(r[col] ?? "") === c2).length; });
-      return { name: cat, value: ds.rows.filter(r => String(r[col] ?? "") === cat).length };
-    });
-    return (
-      <ResponsiveContainer width="100%" height={Math.max(200, data.length * 28)}>
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: showLabel ? 60 : 36, left: 8, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
-          <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
-          <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={90} />
-          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
-          <Bar dataKey="value" name={mode} radius={[0, 3, 3, 0]} label={showLabel ? { position: "right", fontSize: 10, fill: C.txS } : false}>
-            {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    );
-  }
+  const baseH = Math.max(200, data.length * 28);
+  const h = Math.round(baseH * chartH);
+  const vals = data.map(d => d.value);
+  const xDomain = autoAxis
+    ? [Math.max(0, Math.min(...vals) * 0.9), Math.max(...vals) * 1.05]
+    : [0, "auto"];
+  const labelProps = showLabel ? { position: "right", fontSize: 10, fill: C.txS, formatter: v => v.toLocaleString() } : false;
   return (
-    <ResponsiveContainer width="100%" height={Math.max(200, data.length * 28)}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: showLabel ? 60 : 36, left: 8, bottom: 4 }}>
+    <ResponsiveContainer width="100%" height={h}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: showLabel ? 70 : 36, left: 8, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
+        <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} domain={xDomain} tickFormatter={v => v.toLocaleString()} />
         <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={90} />
-        <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
-        <Bar dataKey="value" name={mode} radius={[0, 3, 3, 0]} label={showLabel ? { position: "right", fontSize: 10, fill: C.txS } : false}>
+        <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: "0.5px solid " + C.bd }} formatter={v => [v.toLocaleString(), mode]} />
+        <Bar dataKey="value" name={mode} radius={[0, 3, 3, 0]} label={labelProps}>
           {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
         </Bar>
       </BarChart>
@@ -133,17 +117,23 @@ function CustomBarChart({ ds, col, mode, barStyle, showLabel }) {
   );
 }
 
-function CustomGroupedBar({ ds, catCol, numCol, mode, showLabel }) {
+function CustomGroupedBar({ ds, catCol, numCol, mode, showLabel, chartH=1, autoAxis=false }) {
   const data = aggData(ds.rows, catCol, numCol, mode || "mean");
   if (!data.length) return <NoData />;
+  const h = Math.round(Math.max(200, data.length * 28) * chartH);
+  const vals = data.map(d => d.value);
+  const xDomain = autoAxis
+    ? [Math.max(0, Math.min(...vals) * 0.9), Math.max(...vals) * 1.05]
+    : [0, "auto"];
+  const labelProps = showLabel ? { position: "right", fontSize: 10, fill: C.txS, formatter: v => v.toLocaleString() } : false;
   return (
-    <ResponsiveContainer width="100%" height={Math.max(200, data.length * 28)}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: showLabel ? 60 : 40, left: 8, bottom: 4 }}>
+    <ResponsiveContainer width="100%" height={h}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: showLabel ? 70 : 40, left: 8, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
+        <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} domain={xDomain} tickFormatter={v => v.toLocaleString()} />
         <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={90} />
-        <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} formatter={v => [v, mode]} />
-        <Bar dataKey="value" name={mode} radius={[0, 3, 3, 0]} label={showLabel ? { position: "right", fontSize: 10, fill: C.txS } : false}>
+        <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: "0.5px solid " + C.bd }} formatter={v => [v.toLocaleString(), mode]} />
+        <Bar dataKey="value" name={mode} radius={[0, 3, 3, 0]} label={labelProps}>
           {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
         </Bar>
       </BarChart>
@@ -151,7 +141,7 @@ function CustomGroupedBar({ ds, catCol, numCol, mode, showLabel }) {
   );
 }
 
-function CustomPieChart({ ds, col, donut }) {
+function CustomPieChart({ ds, col, donut, chartH=1 }) {
   const freq = {};
   ds.rows.forEach(r => { const v = String(r[col] ?? ""); freq[v] = (freq[v] || 0) + 1; });
   const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
@@ -166,7 +156,7 @@ function CustomPieChart({ ds, col, donut }) {
     return <text x={cx + r * Math.cos(-midAngle * R)} y={cy + r * Math.sin(-midAngle * R)} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11}>{`${(percent * 100).toFixed(0)}%`}</text>;
   };
   return (
-    <ResponsiveContainer width="100%" height={270}>
+    <ResponsiveContainer width="100%" height={Math.round(270 * chartH)}>
       <PieChart>
         <Pie data={data} cx="50%" cy="50%" outerRadius={110} innerRadius={donut ? 50 : 0} dataKey="value" labelLine={false} label={lbl}>
           {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
@@ -178,20 +168,23 @@ function CustomPieChart({ ds, col, donut }) {
   );
 }
 
-function CustomHistChart({ ds, col, hueCol }) {
+function CustomHistChart({ ds, col, hueCol, chartH=1, autoAxis=false }) {
   const allVals = ds.rows.map(r => parseFloat(r[col])).filter(v => !isNaN(v));
   if (!allVals.length) return <NoData />;
   const mn = Math.min(...allVals), mx = Math.max(...allVals), w = (mx - mn) / 20 || 1;
   if (!hueCol) {
     const counts = Array.from({ length: 20 }, (_, i) => ({ x: +(mn + i * w).toFixed(2), count: 0 }));
     allVals.forEach(v => { counts[Math.min(Math.floor((v - mn) / w), 19)].count++; });
+    const h1 = Math.round(240 * chartH);
+    const yVals = counts.map(c => c.count);
+    const yDomain = autoAxis ? [0, Math.max(...yVals) * 1.1] : [0, "auto"];
     return (
-      <ResponsiveContainer width="100%" height={240}>
+      <ResponsiveContainer width="100%" height={h1}>
         <BarChart data={counts} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
           <XAxis dataKey="x" tick={{ fontSize: 10, fill: C.txS }} label={{ value: col, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
-          <YAxis tick={{ fontSize: 10, fill: C.txS }} />
-          <Tooltip formatter={v => [v, "빈도"]} contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDomain} />
+          <Tooltip formatter={v => [v, "빈도"]} contentStyle={{ fontSize: 11, borderRadius: 6, border: "0.5px solid " + C.bd }} />
           <Bar dataKey="count" fill="#378ADD" radius={[2, 2, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
@@ -223,7 +216,7 @@ function CustomHistChart({ ds, col, hueCol }) {
   );
 }
 
-function CustomScatterChart({ ds, xCol, yCol, hueCol }) {
+function CustomScatterChart({ ds, xCol, yCol, hueCol, chartH=1, autoAxis=false }) {
   const hueVals = hueCol ? [...new Set(ds.rows.map(r => String(r[hueCol] ?? "")))].slice(0, 8) : ["all"];
   const getRows = hv => ds.rows.filter(r => !hueCol || String(r[hueCol] ?? "") === hv).map(r => ({ x: parseFloat(r[xCol]), y: parseFloat(r[yCol]) })).filter(p => !isNaN(p.x) && !isNaN(p.y)).slice(0, 400);
   const n = ds.rows.length;
@@ -233,14 +226,18 @@ function CustomScatterChart({ ds, xCol, yCol, hueCol }) {
   const num = sx.reduce((s, v, i) => s + (v - mxv) * ((sy[i] || 0) - myv), 0);
   const den = Math.sqrt(sx.reduce((s, v) => s + (v - mxv) ** 2, 0) * sy.reduce((s, v) => s + (v - myv) ** 2, 0));
   const r = den ? +(num / den).toFixed(3) : 0;
+  const scatH = Math.round(260 * chartH);
+  const allX = data.map(p => p.x), allY = data.map(p => p.y);
+  const xDom = autoAxis ? [Math.min(...allX)*0.95, Math.max(...allX)*1.05] : ["auto","auto"];
+  const yDom = autoAxis ? [Math.min(...allY)*0.95, Math.max(...allY)*1.05] : ["auto","auto"];
   return (
     <div>
       <div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>상관계수 r = <strong style={{ color: Math.abs(r) > 0.7 ? "#1D9E75" : Math.abs(r) > 0.4 ? "#BA7517" : C.tx }}>{r}</strong></div>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={scatH}>
         <ScatterChart margin={{ top: 4, right: 8, left: 0, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
-          <XAxis type="number" dataKey="x" name={xCol} tick={{ fontSize: 10, fill: C.txS }} label={{ value: xCol, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
-          <YAxis type="number" dataKey="y" name={yCol} tick={{ fontSize: 10, fill: C.txS }} />
+          <XAxis type="number" dataKey="x" name={xCol} tick={{ fontSize: 10, fill: C.txS }} domain={xDom} label={{ value: xCol, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
+          <YAxis type="number" dataKey="y" name={yCol} tick={{ fontSize: 10, fill: C.txS }} domain={yDom} />
           <Tooltip content={({ payload }) => payload?.length ? <div style={{ background: C.bg, border: `0.5px solid ${C.bd}`, borderRadius: 6, padding: "5px 8px", fontSize: 11 }}>{hueCol && <div>{hueCol}: {payload[0]?.payload?.hue}</div>}<div>{xCol}: {payload[0]?.payload?.x}</div><div>{yCol}: {payload[0]?.payload?.y}</div></div> : null} />
           {hueVals.map((hv, i) => <Scatter key={hv} name={hv === "all" ? `${xCol} × ${yCol}` : hv} data={getRows(hv).map(p => ({ ...p, hue: hv }))} fill={PALETTE[i % PALETTE.length]} fillOpacity={0.55} r={3} />)}
           {hueCol && <Legend wrapperStyle={{ fontSize: 11 }} />}
@@ -250,16 +247,19 @@ function CustomScatterChart({ ds, xCol, yCol, hueCol }) {
   );
 }
 
-function CustomLineChart({ ds, xCol, yCol, hueCol }) {
+function CustomLineChart({ ds, xCol, yCol, hueCol, chartH=1, autoAxis=false }) {
   if (!hueCol) {
     const data = ds.rows.map(r => ({ x: String(r[xCol] ?? ""), y: parseFloat(r[yCol]) })).filter(p => p.x && !isNaN(p.y)).sort((a, b) => a.x.localeCompare(b.x)).slice(0, 500);
     if (!data.length) return <NoData />;
+    const lineH = Math.round(260 * chartH);
+    const yVals2 = data.map(d => d.y).filter(v => v != null);
+    const yDom2 = autoAxis && yVals2.length ? [Math.min(...yVals2)*0.95, Math.max(...yVals2)*1.05] : ["auto","auto"];
     return (
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={lineH}>
         <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 24 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
           <XAxis dataKey="x" tick={{ fontSize: 10, fill: C.txS }} interval="preserveStartEnd" label={{ value: xCol, position: "insideBottom", offset: -16, fontSize: 10, fill: C.txS }} />
-          <YAxis tick={{ fontSize: 10, fill: C.txS }} />
+          <YAxis tick={{ fontSize: 10, fill: C.txS }} domain={yDom2} />
           <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
           <Line type="monotone" dataKey="y" name={yCol} stroke="#185FA5" dot={false} strokeWidth={2} />
         </LineChart>
@@ -291,7 +291,7 @@ function CustomLineChart({ ds, xCol, yCol, hueCol }) {
   );
 }
 
-function CustomBoxPlot({ ds, col, groupCol }) {
+function CustomBoxPlot({ ds, col, groupCol, chartH=1 }) {
   const calcBox = vals => {
     if (!vals.length) return null;
     const s = [...vals].sort((a, b) => a - b);
@@ -316,7 +316,7 @@ function CustomBoxPlot({ ds, col, groupCol }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>박스: Q1~Q3 범위 · 선: 중앙값 · 수염: 1.5×IQR</div>
-      <ResponsiveContainer width="100%" height={Math.max(220, data.length * 36)}>
+      <ResponsiveContainer width="100%" height={Math.round(Math.max(220, data.length * 36) * chartH)}>
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
@@ -350,6 +350,8 @@ export function VizTab({ allDs }) {
   const [barStyle, setBarStyle] = useState("normal");
   const [donut, setDonut] = useState(false);
   const [showLabel, setShowLabel] = useState(false);
+  const [chartH, setChartH] = useState(1);      // 1 = 기본, 1.5 = 1.5배
+  const [autoAxis, setAutoAxis] = useState(false); // 축 실제값 중심
 
   const ds = allDs.find(d => d.id === selId);
   const prevId = useRef(selId);
@@ -657,8 +659,8 @@ export function VizTab({ allDs }) {
                 )}
               </div>
 
-              {/* 옵션 */}
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              {/* 옵션 행 1: 차트별 옵션 */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
                 {ct === "bar" && (
                   <>
                     <span style={{ fontSize: 12, color: C.txS }}>스타일</span>
@@ -685,18 +687,32 @@ export function VizTab({ allDs }) {
                   </>
                 )}
               </div>
+              {/* 옵션 행 2: 공통 - 높이/축 */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", paddingTop: 8, borderTop: "0.5px solid " + C.bd }}>
+                <span style={{ fontSize: 12, color: C.txS }}>그래프 높이</span>
+                {[{ v:1, label:"기본" }, { v:1.5, label:"1.5배 크게" }].map(h => (
+                  <span key={h.v} onClick={() => setChartH(h.v)} style={chipStyle(chartH === h.v)}>{h.label}</span>
+                ))}
+                {ct !== "pie" && (
+                  <>
+                    <span style={{ fontSize: 12, color: C.txS, marginLeft: 8 }}>축</span>
+                    <span onClick={() => setAutoAxis(false)} style={chipStyle(!autoAxis)}>전체</span>
+                    <span onClick={() => setAutoAxis(true)} style={chipStyle(autoAxis)}>값 중심</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
           {/* 차트 결과 */}
           <ChartCard title={CHART_TYPES.find(t => t.id===ct)?.label || ""} subtitle="컬럼을 선택하면 차트가 표시됩니다">
-            {ct==="bar"     && catCol  ? <CustomBarChart     ds={ds} col={catCol} mode={barMode} barStyle={barStyle} showLabel={showLabel}/> : null}
-            {ct==="pie"     && catCol  ? <CustomPieChart     ds={ds} col={catCol} donut={donut}/> : null}
-            {ct==="hist"    && xCol    ? <CustomHistChart    ds={ds} col={xCol} hueCol={hueCol}/> : null}
-            {ct==="scatter" && xCol && yCol && xCol!==yCol ? <CustomScatterChart ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol}/> : null}
-            {ct==="line"    && xCol && yCol ? <CustomLineChart   ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol}/> : null}
-            {ct==="grouped" && catCol && numCol ? <CustomGroupedBar ds={ds} catCol={catCol} numCol={numCol} mode={barMode} showLabel={showLabel}/> : null}
-            {ct==="box"     && xCol    ? <CustomBoxPlot     ds={ds} col={xCol} groupCol={catCol || ""}/> : null}
+            {ct==="bar"     && catCol  ? <CustomBarChart     ds={ds} col={catCol} mode={barMode} barStyle={barStyle} showLabel={showLabel} chartH={chartH} autoAxis={autoAxis}/> : null}
+            {ct==="pie"     && catCol  ? <CustomPieChart     ds={ds} col={catCol} donut={donut} chartH={chartH}/> : null}
+            {ct==="hist"    && xCol    ? <CustomHistChart    ds={ds} col={xCol} hueCol={hueCol} chartH={chartH} autoAxis={autoAxis}/> : null}
+            {ct==="scatter" && xCol && yCol && xCol!==yCol ? <CustomScatterChart ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol} chartH={chartH} autoAxis={autoAxis}/> : null}
+            {ct==="line"    && xCol && yCol ? <CustomLineChart   ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol} chartH={chartH} autoAxis={autoAxis}/> : null}
+            {ct==="grouped" && catCol && numCol ? <CustomGroupedBar ds={ds} catCol={catCol} numCol={numCol} mode={barMode} showLabel={showLabel} chartH={chartH} autoAxis={autoAxis}/> : null}
+            {ct==="box"     && xCol    ? <CustomBoxPlot     ds={ds} col={xCol} groupCol={catCol || ""} chartH={chartH}/> : null}
             {!(
               (ct==="bar"&&catCol)||(ct==="pie"&&catCol)||(ct==="hist"&&xCol)||
               (ct==="scatter"&&xCol&&yCol&&xCol!==yCol)||(ct==="line"&&xCol&&yCol)||
