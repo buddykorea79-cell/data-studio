@@ -251,17 +251,18 @@ function ActualVsPred({ actual, predicted }) {
 
 // ── FeatureTag helper ─────────────────────────────────────────────────────────
 function FeatTag({ c, isSelected, isNum, onClick, dim }) {
-  const bg = isSelected ? (isNum ? "#E6F1FB" : "#EEEDFE") : C.bg;
-  const color = isSelected ? (isNum ? "#0C447C" : "#3C3489") : C.txS;
-  const bw = isSelected ? "2px" : "0.5px";
-  const bc = isSelected ? (isNum ? "#185FA5" : "#7F77DD") : C.bd;
+  const bg = isSelected ? (isNum ? "#E6F1FB" : "#EEEDFE") : C.bgS;
+  const color = isSelected ? (isNum ? "#0C447C" : "#3C3489") : C.tx;
+  const bw = isSelected ? "2px" : "1px";
+  const bc = isSelected ? (isNum ? "#185FA5" : "#7F77DD") : C.bdS;
   return (
     <span onClick={onClick} style={{
-      fontSize:12, padding:"5px 12px", borderRadius:10, cursor:"pointer",
+      fontSize:12, padding:"6px 14px", borderRadius:20, cursor:"pointer",
       background:bg, color:color,
       border: bw + " solid " + bc,
-      fontFamily:"var(--font-mono)", fontWeight:isSelected?500:400,
+      fontFamily:"var(--font-mono)", fontWeight:isSelected?600:400,
       opacity: dim ? 0.4 : 1,
+      transition:"all 0.1s",
     }}>
       {c}{isSelected ? " ✓" : ""}
     </span>
@@ -269,18 +270,20 @@ function FeatTag({ c, isSelected, isNum, onClick, dim }) {
 }
 
 function TargetTag({ c, isSelected, task, isDisabled, onClick }) {
-  const bg = isSelected ? (task==="regression" ? "#E6F1FB" : "#EEEDFE") : C.bg;
+  const bg = isSelected ? (task==="regression" ? "#E6F1FB" : "#EEEDFE") : isDisabled ? C.bgT : C.bgS;
   const color = isSelected ? (task==="regression" ? "#0C447C" : "#3C3489") : isDisabled ? C.txT : C.tx;
-  const bw = isSelected ? "2px" : "0.5px";
+  const bw = isSelected ? "2px" : "1px";
   const bc = isSelected ? (task==="regression" ? "#185FA5" : "#7F77DD") : isDisabled ? C.bd : C.bdS;
   return (
-    <span onClick={onClick} style={{
-      fontSize:12, padding:"5px 12px", borderRadius:10, cursor:"pointer",
+    <span onClick={!isDisabled ? onClick : undefined} style={{
+      fontSize:12, padding:"6px 14px", borderRadius:20, cursor:isDisabled?"not-allowed":"pointer",
       background:bg, color:color,
       border: bw + " solid " + bc,
-      fontFamily:"var(--font-mono)", fontWeight:isSelected?500:400,
+      fontFamily:"var(--font-mono)", fontWeight:isSelected?600:400,
+      opacity: isDisabled ? 0.5 : 1,
+      transition:"all 0.1s",
     }}>
-      {c}
+      {c}{isSelected ? " ✓" : ""}
     </span>
   );
 }
@@ -559,10 +562,10 @@ export function MLTab({ allDs, apiKey }) {
   if (!ds) return <div style={{ padding:48, textAlign:"center", color:C.txT }}>파일을 업로드해 주세요.</div>;
 
   const TASKS = [
-    { id:"regression",     icon:"📈", label:"숫자 예측",      sub:"회귀 (Regression)",       desc:"집값, 매출 등 숫자 예측",     when:"타겟이 숫자형일 때" },
-    { id:"classification", icon:"🏷️", label:"카테고리 분류",  sub:"분류 (Classification)",    desc:"스팸/정상, 등급 분류 등",     when:"타겟이 범주형일 때" },
-    { id:"clustering",     icon:"🔵", label:"자동 그룹 분류", sub:"군집화 (K-Means)",         desc:"비슷한 것끼리 자동 묶기",     when:"분류 기준 없을 때" },
-    { id:"neural",         icon:"🧠", label:"신경망 분류",    sub:"딥러닝 (MLP)",             desc:"복잡한 패턴 학습",            when:"분류 정확도 높이고 싶을 때" },
+    { id:"regression",     icon:"📈", label:"숫자 예측",      sub:"회귀 (Regression)",         desc:"집값, 매출 등 숫자 예측",    when:"타겟이 숫자형일 때" },
+    { id:"classification", icon:"🏷️", label:"카테고리 분류",  sub:"분류 (Classification)",     desc:"스팸/정상, 등급 분류 등",    when:"타겟이 범주형일 때" },
+    { id:"clustering",     icon:"🔵", label:"자동 그룹 분류", sub:"군집화 (K-Means)",          desc:"비슷한 것끼리 자동 묶기",    when:"분류 기준 없을 때" },
+    { id:"timeseries",     icon:"📉", label:"시계열 분석",    sub:"Time Series (MA/EWM/Trend)",desc:"추세·이동평균·계절성 분석",  when:"시간 순서 데이터일 때" },
   ];
   // 태스크별 사용 가능 모델
   const MODELS = {
@@ -625,17 +628,19 @@ export function MLTab({ allDs, apiKey }) {
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:12 }}>
             {TASKS.map(t => (
               <div key={t.id} onClick={() => selectTask(t.id)} style={{
-                padding:16, borderRadius:"var(--border-radius-lg)", border:"0.5px solid "+C.bd,
+                padding:18, borderRadius:"var(--border-radius-lg)",
+                border: "1.5px solid " + C.bdS,
                 cursor:"pointer", background:C.bg, transition:"all 0.15s",
+                boxShadow:"0 1px 3px rgba(0,0,0,0.06)",
               }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = C.infoTx}
-                onMouseLeave={e => e.currentTarget.style.borderColor = C.bd}
+                onMouseEnter={e => { e.currentTarget.style.borderColor="#185FA5"; e.currentTarget.style.boxShadow="0 3px 10px rgba(24,95,165,0.15)"; e.currentTarget.style.background="#F5F9FF"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor=C.bdS; e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.06)"; e.currentTarget.style.background=C.bg; }}
               >
-                <div style={{ fontSize:26, marginBottom:8 }}>{t.icon}</div>
-                <div style={{ fontSize:14, fontWeight:500, color:C.tx, marginBottom:2 }}>{t.label}</div>
-                <div style={{ fontSize:11, color:C.infoTx, marginBottom:6 }}>{t.sub}</div>
-                <div style={{ fontSize:12, color:C.txS, marginBottom:8 }}>{t.desc}</div>
-                <div style={{ fontSize:11, padding:"3px 8px", borderRadius:4, background:C.bgS, color:C.txT, display:"inline-block" }}>
+                <div style={{ fontSize:28, marginBottom:10 }}>{t.icon}</div>
+                <div style={{ fontSize:14, fontWeight:600, color:C.tx, marginBottom:3 }}>{t.label}</div>
+                <div style={{ fontSize:12, color:"#185FA5", fontWeight:500, marginBottom:6 }}>{t.sub}</div>
+                <div style={{ fontSize:12, color:C.txS, marginBottom:10, lineHeight:1.5 }}>{t.desc}</div>
+                <div style={{ fontSize:11, padding:"4px 10px", borderRadius:20, background:"#E6F1FB", color:"#185FA5", display:"inline-block", fontWeight:500 }}>
                   💡 {t.when}
                 </div>
               </div>
@@ -659,9 +664,46 @@ export function MLTab({ allDs, apiKey }) {
           <DsSelector datasets={allDs} value={selId}
             onChange={v => { setSelId(v); setTask(""); setStep(1); }} label="데이터셋"/>
 
+          {/* 모델 선택 */}
+          {task && MODELS[task] && MODELS[task].length > 1 && (
+            <Section title="🤖 모델 선택" desc="사용할 알고리즘을 선택하세요">
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8 }}>
+                {MODELS[task].map(m => (
+                  <div key={m.id} onClick={() => setModelId(m.id)} style={{
+                    padding:"12px 14px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+                    border: modelId===m.id ? "2px solid #185FA5" : "1px solid "+C.bdS,
+                    background: modelId===m.id ? "#E6F1FB" : C.bgS,
+                    transition:"all 0.15s",
+                  }}>
+                    <div style={{ fontSize:13, fontWeight:600, color:modelId===m.id?"#185FA5":C.tx, marginBottom:3 }}>{m.label}</div>
+                    <div style={{ fontSize:11, color:C.txS }}>{m.desc}</div>
+                    {modelId===m.id && <div style={{ marginTop:6, fontSize:10, color:"#185FA5", fontWeight:500 }}>✓ 선택됨</div>}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {/* 시계열: 분석 컬럼 */}
+          {task === "timeseries" && (
+            <Section title={"📈 분석 컬럼 — " + (targetCol || "선택 안 됨")} desc="시계열로 분석할 숫자형 컬럼">
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                {numCols.map(c => (
+                  <span key={c} onClick={() => setTargetCol(c)} style={{
+                    fontSize:12, padding:"6px 14px", borderRadius:20, cursor:"pointer",
+                    background: targetCol===c ? "#E6F1FB" : C.bgS,
+                    color: targetCol===c ? "#0C447C" : C.tx,
+                    border: (targetCol===c ? "2px" : "1px") + " solid " + (targetCol===c ? "#185FA5" : C.bdS),
+                    fontFamily:"var(--font-mono)", fontWeight: targetCol===c ? 600 : 400,
+                  }}>{c}{targetCol===c ? " ✓" : ""}</span>
+                ))}
+              </div>
+            </Section>
+          )}
+
           {/* 타겟 컬럼 */}
-          {task !== "clustering" && (
-            <Section title={"🎯 타겟 컬럼 — " + (targetCol || "선택 안 됨")} desc="예측/분류할 대상">
+          {task !== "clustering" && task !== "timeseries" && (
+            <Section title={"🎯 타겟 컬럼 — " + (targetCol || "선택 안 됨")} desc="예측/분류할 대상 컬럼">
               <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                 {allCols.map(c => {
                   const meta = ds.colMeta.find(m => m.name === c);
@@ -701,14 +743,17 @@ export function MLTab({ allDs, apiKey }) {
             <Section title="몇 개 그룹으로 나눌까요?">
               <div style={{ display:"flex", gap:8 }}>
                 {[2,3,4,5,6].map(k => (
-                  <span key={k} onClick={() => setKClusters(k)} style={{
-                    width:40, height:40, borderRadius:"50%", display:"flex",
-                    alignItems:"center", justifyContent:"center", cursor:"pointer",
-                    background: kClusters===k ? C.info : C.bgS,
-                    color: kClusters===k ? C.infoTx : C.txS,
-                    fontSize:14, fontWeight: kClusters===k ? 500 : 400,
-                    border: (kClusters===k?"2px":"0.5px") + " solid " + (kClusters===k?C.infoTx:C.bd),
-                  }}>{k}</span>
+                  <div key={k} onClick={() => setKClusters(k)} style={{
+                    padding:"10px 16px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+                    background: kClusters===k ? "#E6F1FB" : C.bgS,
+                    color: kClusters===k ? "#185FA5" : C.tx,
+                    fontSize:15, fontWeight: kClusters===k ? 700 : 400,
+                    border: (kClusters===k?"2px":"1px") + " solid " + (kClusters===k?"#185FA5":C.bdS),
+                    textAlign:"center", minWidth:52, transition:"all 0.1s",
+                  }}>
+                    <div>{k}</div>
+                    <div style={{ fontSize:10, color:kClusters===k?"#185FA5":C.txS }}>그룹</div>
+                  </div>
                 ))}
               </div>
             </Section>
@@ -718,14 +763,15 @@ export function MLTab({ allDs, apiKey }) {
           {task !== "clustering" && (
             <Section title="학습/검증 데이터 비율" desc="전체 데이터를 학습과 검증으로 나누는 비율입니다">
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                {[{v:0.1,label:"9:1"},{v:0.2,label:"8:2 (권장)"},{v:0.3,label:"7:3"},{v:0.4,label:"6:4"}].map(({v,label}) => (
+                {[{v:0.1,label:"9:1"},{v:0.2,label:"8:2",rec:true},{v:0.3,label:"7:3"},{v:0.4,label:"6:4"}].map(({v,label,rec}) => (
                   <div key={v} onClick={() => setTestRatio(v)} style={{
-                    padding:"8px 16px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
-                    border: (testRatio===v?"2px solid #185FA5":"0.5px solid "+C.bd),
-                    background: testRatio===v ? "#E6F1FB" : C.bg,
+                    padding:"10px 16px", borderRadius:"var(--border-radius-md)", cursor:"pointer",
+                    border: (testRatio===v?"2px solid #185FA5":"1px solid "+C.bdS),
+                    background: testRatio===v ? "#E6F1FB" : C.bgS,
+                    transition:"all 0.1s", textAlign:"center",
                   }}>
-                    <div style={{ fontSize:13, fontWeight:500, color:testRatio===v?"#185FA5":C.tx }}>{label}</div>
-                    <div style={{ fontSize:11, color:C.txS }}>{"검증 " + (v*100) + "%"}</div>
+                    <div style={{ fontSize:14, fontWeight:700, color:testRatio===v?"#185FA5":C.tx }}>{label}</div>
+                    <div style={{ fontSize:10, color:testRatio===v?"#185FA5":C.txS }}>{"검증 " + (v*100) + "%" + (rec?" ⭐":"") }</div>
                   </div>
                 ))}
               </div>
@@ -776,16 +822,25 @@ export function MLTab({ allDs, apiKey }) {
               {error}
             </div>
           )}
-          <Btn variant="primary" onClick={run}
-            disabled={running || featureCols.length===0 || (task!=="clustering" && !targetCol)}
-            full>
-            {running ? "⏳ 학습 중... (수 초~수십 초 소요)" : "🚀 학습 시작하기"}
-          </Btn>
-          {running && (
-            <div style={{ fontSize:12, color:C.txS, marginTop:8, textAlign:"center" }}>
-              브라우저에서 직접 학습합니다. 잠시만 기다려 주세요!
-            </div>
-          )}
+          <div style={{ marginTop:8 }}>
+            <button onClick={run}
+              disabled={running || (task!=="clustering"&&task!=="timeseries"&&featureCols.length===0) || (task!=="clustering"&&task!=="timeseries"&&!targetCol) || (task==="timeseries"&&!targetCol)}
+              style={{
+                width:"100%", padding:"14px", fontSize:15, fontWeight:700, cursor:"pointer",
+                borderRadius:"var(--border-radius-lg)", border:"none",
+                background: running ? "#8ab3d4" : "linear-gradient(135deg,#185FA5 0%,#1D9E75 100%)",
+                color:"#fff", letterSpacing:"0.02em",
+                boxShadow: running ? "none" : "0 3px 10px rgba(24,95,165,0.3)",
+                transition:"all 0.2s",
+              }}>
+              {running ? "⏳ 학습 중... 잠시만 기다려 주세요" : "🚀 학습 시작하기"}
+            </button>
+            {running && (
+              <div style={{ fontSize:12, color:C.txS, marginTop:8, textAlign:"center" }}>
+                브라우저에서 직접 학습합니다. 잠시만 기다려 주세요!
+              </div>
+            )}
+          </div>
         </div>
       )}
 

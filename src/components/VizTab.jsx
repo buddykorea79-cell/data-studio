@@ -318,7 +318,11 @@ function CustomBoxPlot({ ds, col, groupCol, chartH=1 }) {
       <ResponsiveContainer width="100%" height={Math.round(Math.max(220, data.length * 36) * chartH)}>
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 50, left: 8, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
-          <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
+          <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }}
+            domain={autoAxis ? (() => {
+              const allVals = data.flatMap(d => [d._lo, d._hi]).filter(v => v != null);
+              return allVals.length ? [Math.min(...allVals)*0.95, Math.max(...allVals)*1.05] : [0, "auto"];
+            })() : [0, "auto"]} />
           <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={80} />
           <Tooltip content={({ payload, label }) => payload?.length ? <div style={{ background: C.bg, border: `0.5px solid ${C.bd}`, borderRadius: 6, padding: "7px 10px", fontSize: 11 }}><div style={{ fontWeight: 500, marginBottom: 4 }}>{label}</div><div>최솟값: {payload[0]?.payload?._lo}</div><div>Q1: {payload[0]?.payload?._q1}</div><div>중앙값: {payload[0]?.payload?._med}</div><div>Q3: {payload[0]?.payload?._q3}</div><div>최댓값: {payload[0]?.payload?._hi}</div></div> : null} />
           <Bar dataKey="lo" stackId="box" fill="transparent" />
