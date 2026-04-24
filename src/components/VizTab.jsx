@@ -332,3 +332,379 @@ function CustomBoxPlot({ ds, col, groupCol }) {
     </div>
   );
 }
+
+// ── VizTab main ───────────────────────────────────────────────────────────────
+export function VizTab({ allDs }) {
+  const [selId, setSelId] = useState(() => allDs[0]?.id ?? "");
+  const [sec, setSec] = useState("auto");
+  // custom chart state
+  const [ct, setCt] = useState("bar");
+  const [xCol, setXCol] = useState("");
+  const [yCol, setYCol] = useState("");
+  const [xCol2, setXCol2] = useState("");
+  const [yCol2, setYCol2] = useState("");
+  const [catCol, setCatCol] = useState("");
+  const [numCol, setNumCol] = useState("");
+  const [hueCol, setHueCol] = useState("");
+  const [barMode, setBarMode] = useState("count");
+  const [barStyle, setBarStyle] = useState("normal");
+  const [donut, setDonut] = useState(false);
+  const [showLabel, setShowLabel] = useState(false);
+
+  const ds = allDs.find(d => d.id === selId);
+  const prevId = useRef(selId);
+  if (prevId.current !== selId) {
+    prevId.current = selId;
+    setXCol(""); setYCol(""); setXCol2(""); setYCol2("");
+    setCatCol(""); setNumCol(""); setHueCol(""); setSec("auto");
+  }
+
+  if (!ds) return <div style={{ padding: 48, textAlign: "center", color: C.txT }}>파일을 업로드해 주세요.</div>;
+
+  const numCols = getNumCols(ds);
+  const catCols = getCatCols(ds);
+
+  const SECS = [
+    { id: "auto",    label: "자동 분석" },
+    { id: "dist",    label: "분포" },
+    { id: "cat",     label: "범주형" },
+    { id: "corr",    label: "상관관계" },
+    { id: "missing", label: "결측값" },
+    { id: "custom",  label: "커스텀" },
+  ];
+
+  const CHART_TYPES = [
+    { id: "bar",     label: "막대",       desc: "누적/그룹 선택가능" },
+    { id: "pie",     label: "파이/도넛",  desc: "비율" },
+    { id: "hist",    label: "히스토그램", desc: "분포+Hue" },
+    { id: "scatter", label: "산점도",     desc: "숫자×숫자+Hue" },
+    { id: "line",    label: "라인",       desc: "추세+Hue" },
+    { id: "grouped", label: "그룹막대",   desc: "범주별 집계" },
+    { id: "box",     label: "박스플롯",   desc: "분포+이상치" },
+  ];
+
+  const tabStyle = active => ({
+    fontSize: 12, padding: "8px 14px", cursor: "pointer", background: "transparent",
+    border: "none", borderBottom: active ? "2px solid " + C.infoTx : "2px solid transparent",
+    color: active ? C.infoTx : C.txS, fontWeight: active ? 500 : 400,
+    whiteSpace: "nowrap", marginBottom: -0.5,
+  });
+
+  const chipStyle = active => ({
+    fontSize: 11, padding: "3px 9px", borderRadius: 10, cursor: "pointer",
+    background: active ? C.info : C.bg, color: active ? C.infoTx : C.txS,
+    border: "0.5px solid " + (active ? C.infoTx : C.bd),
+    fontWeight: active ? 500 : 400,
+  });
+
+  const selStyle = {
+    width: "100%", fontSize: 13, padding: "6px 8px",
+    borderRadius: "var(--border-radius-md)",
+    border: "0.5px solid " + C.bdS, background: C.bg, color: C.tx,
+  };
+
+  return (
+    <div>
+      {/* 파일 선택 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <span style={{ fontSize: 13, color: C.txS, whiteSpace: "nowrap" }}>데이터셋</span>
+        <select value={selId} onChange={e => setSelId(e.target.value)} style={{ ...selStyle }}>
+          {allDs.map(d => (
+            <option key={d.id} value={d.id}>{d.name} ({d.rowCount.toLocaleString()}행 × {d.columns.length}열)</option>
+          ))}
+        </select>
+      </div>
+
+      {/* 섹션 탭 */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: "0.5px solid " + C.bd, overflowX: "auto" }}>
+        {SECS.map(s => (
+          <button key={s.id} onClick={() => setSec(s.id)} style={tabStyle(sec === s.id)}>{s.label}</button>
+        ))}
+      </div>
+
+      {/* 자동 분석 */}
+      {sec === "auto" && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 18 }}>
+            {[["전체 행", ds.rowCount.toLocaleString()], ["숫자형", numCols.length], ["범주형", catCols.length]].map(([l, v]) => (
+              <div key={l} style={{ background: C.bgS, borderRadius: "var(--border-radius-md)", padding: "10px 14px" }}>
+                <div style={{ fontSize: 11, color: C.txS, marginBottom: 3 }}>{l}</div>
+                <div style={{ fontSize: 18, fontWeight: 500, color: C.tx, fontFamily: "var(--font-mono)" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {numCols.length > 0 && (
+            <ChartCard title="숫자형 컬럼 분포" subtitle={numCols.slice(0,4).map(c=>c.name).join(" · ")}>
+              <div style={{ display: "grid", gridTemplateColumns: numCols.length > 1 ? "1fr 1fr" : "1fr", gap: 14 }}>
+                {numCols.slice(0, 4).map(col => (
+                  <div key={col.name}>
+                    <div style={{ fontSize: 11, color: C.txS, marginBottom: 4, fontFamily: "var(--font-mono)" }}>{col.name}</div>
+                    <HistChart ds={ds} col={col.name}/>
+                  </div>
+                ))}
+              </div>
+            </ChartCard>
+          )}
+          {catCols.length > 0 && (
+            <ChartCard title="범주형 컬럼 분포" subtitle={catCols.slice(0,2).map(c=>c.name).join(" · ")}>
+              <div style={{ display: "grid", gridTemplateColumns: catCols.length > 1 ? "1fr 1fr" : "1fr", gap: 18 }}>
+                {catCols.slice(0, 2).map(col => (
+                  <div key={col.name}>
+                    <div style={{ fontSize: 11, color: C.txS, marginBottom: 4, fontFamily: "var(--font-mono)" }}>{col.name}</div>
+                    <BarFreq ds={ds} col={col.name} topN={8}/>
+                  </div>
+                ))}
+              </div>
+            </ChartCard>
+          )}
+          {numCols.length >= 2 && (
+            <ChartCard title="상관관계 히트맵" subtitle="색이 진할수록 상관관계가 강함">
+              <CorrHeatmap ds={ds}/>
+            </ChartCard>
+          )}
+          {ds.colMeta.some(c => c.stats.nullCount > 0) && (
+            <ChartCard title="결측값 현황">
+              <MissingChart ds={ds}/>
+            </ChartCard>
+          )}
+          {catCols.length > 0 && numCols.length > 0 && (
+            <ChartCard title={catCols[0].name + " 별 " + numCols[0].name + " 평균"}>
+              <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name}/>
+            </ChartCard>
+          )}
+        </div>
+      )}
+
+      {/* 분포 */}
+      {sec === "dist" && (
+        <div>
+          {numCols.length === 0
+            ? <div style={{ padding: 40, textAlign: "center", color: C.txT, fontSize: 13 }}>숫자형 컬럼이 없습니다.</div>
+            : numCols.map(col => (
+              <ChartCard key={col.name} title={"분포: " + col.name}
+                subtitle={"평균 " + col.stats.mean + " · 중앙값 " + col.stats.median + " · 표준편차 " + col.stats.std}>
+                <HistChart ds={ds} col={col.name}/>
+              </ChartCard>
+            ))
+          }
+        </div>
+      )}
+
+      {/* 범주형 */}
+      {sec === "cat" && (
+        <div>
+          {catCols.length === 0
+            ? <div style={{ padding: 40, textAlign: "center", color: C.txT, fontSize: 13 }}>범주형 컬럼이 없습니다.</div>
+            : catCols.map(col => (
+              <ChartCard key={col.name} title={"범주 분포: " + col.name} subtitle={"고유값 " + col.stats.unique + "개"}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div><div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>막대 차트</div><BarFreq ds={ds} col={col.name}/></div>
+                  <div><div style={{ fontSize: 11, color: C.txS, marginBottom: 6 }}>파이 차트</div><PieFreq ds={ds} col={col.name}/></div>
+                </div>
+              </ChartCard>
+            ))
+          }
+        </div>
+      )}
+
+      {/* 상관관계 */}
+      {sec === "corr" && (
+        <div>
+          <ChartCard title="상관관계 히트맵" subtitle="숫자형 컬럼 간 피어슨 상관계수 (-1 ~ 1)">
+            <CorrHeatmap ds={ds}/>
+          </ChartCard>
+          {numCols.length >= 2 && (
+            <ChartCard title="산점도 선택" subtitle="두 컬럼을 선택해 관계를 확인합니다">
+              <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+                {[{ label: "X 축", val: xCol2, set: setXCol2 }, { label: "Y 축", val: yCol2, set: setYCol2 }].map(({ label, val, set }) => (
+                  <div key={label} style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>{label}</div>
+                    <select value={val} onChange={e => set(e.target.value)} style={selStyle}>
+                      <option value="">— 선택 —</option>
+                      {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {xCol2 && yCol2 && xCol2 !== yCol2
+                ? <ScatterPlot ds={ds} xCol={xCol2} yCol={yCol2}/>
+                : <div style={{ padding: 24, textAlign: "center", color: C.txT, fontSize: 13 }}>서로 다른 두 컬럼을 선택해 주세요.</div>
+              }
+            </ChartCard>
+          )}
+        </div>
+      )}
+
+      {/* 결측값 */}
+      {sec === "missing" && (
+        <ChartCard title="결측값 현황" subtitle="컬럼별 결측 비율">
+          <MissingChart ds={ds}/>
+        </ChartCard>
+      )}
+
+      {/* 커스텀 */}
+      {sec === "custom" && (
+        <div>
+          <div style={{ border: "0.5px solid " + C.bd, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
+            <div style={{ padding: "11px 14px", background: C.bgS, borderBottom: "0.5px solid " + C.bd }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>차트 유형 & 컬럼 선택</span>
+            </div>
+            <div style={{ padding: 14 }}>
+              {/* 차트 유형 */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 7, marginBottom: 14 }}>
+                {CHART_TYPES.map(t => (
+                  <div key={t.id} onClick={() => { setCt(t.id); setXCol(""); setYCol(""); setCatCol(""); setNumCol(""); setHueCol(""); setBarMode("count"); setBarStyle("normal"); setDonut(false); }}
+                    style={{ padding: "8px 10px", borderRadius: "var(--border-radius-md)", cursor: "pointer",
+                      border: ct===t.id ? "2px solid #185FA5" : "0.5px solid " + C.bd,
+                      background: ct===t.id ? "#E6F1FB" : C.bg }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: ct===t.id ? "#185FA5" : C.tx }}>{t.label}</div>
+                    <div style={{ fontSize: 10, color: C.txS }}>{t.desc}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 컬럼 선택 */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                {(ct === "bar" || ct === "pie") && (
+                  <div style={{ flex: 1, minWidth: 130 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>범주 컬럼</div>
+                    <select value={catCol} onChange={e => setCatCol(e.target.value)} style={selStyle}>
+                      <option value="">— 선택 —</option>
+                      {[...catCols, ...numCols].map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {ct === "hist" && (
+                  <div style={{ flex: 1, minWidth: 130 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>숫자 컬럼</div>
+                    <select value={xCol} onChange={e => setXCol(e.target.value)} style={selStyle}>
+                      <option value="">— 선택 —</option>
+                      {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {(ct === "scatter" || ct === "box") && (
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>{ct === "box" ? "숫자 컬럼" : "X 축"}</div>
+                    <select value={xCol} onChange={e => setXCol(e.target.value)} style={selStyle}>
+                      <option value="">— 선택 —</option>
+                      {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {ct === "scatter" && (
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>Y 축</div>
+                    <select value={yCol} onChange={e => setYCol(e.target.value)} style={selStyle}>
+                      <option value="">— 선택 —</option>
+                      {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {ct === "line" && (
+                  <>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>X 축</div>
+                      <select value={xCol} onChange={e => setXCol(e.target.value)} style={selStyle}>
+                        <option value="">— 선택 —</option>
+                        {ds.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>Y 축</div>
+                      <select value={yCol} onChange={e => setYCol(e.target.value)} style={selStyle}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+                {ct === "grouped" && (
+                  <>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>범주 컬럼</div>
+                      <select value={catCol} onChange={e => setCatCol(e.target.value)} style={selStyle}>
+                        <option value="">— 선택 —</option>
+                        {catCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 120 }}>
+                      <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>숫자 컬럼</div>
+                      <select value={numCol} onChange={e => setNumCol(e.target.value)} style={selStyle}>
+                        <option value="">— 선택 —</option>
+                        {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+                {ct === "box" && (
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>그룹 컬럼 (선택)</div>
+                    <select value={catCol} onChange={e => setCatCol(e.target.value)} style={selStyle}>
+                      <option value="">— 전체 —</option>
+                      {catCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {(ct === "hist" || ct === "scatter" || ct === "line") && (
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 12, color: C.txS, marginBottom: 4 }}>Hue (색상 구분)</div>
+                    <select value={hueCol} onChange={e => setHueCol(e.target.value)} style={selStyle}>
+                      <option value="">— 없음 —</option>
+                      {[...catCols, ...numCols.slice(0,3)].map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* 옵션 */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                {ct === "bar" && (
+                  <>
+                    <span style={{ fontSize: 12, color: C.txS }}>스타일</span>
+                    {[{ id:"normal", label:"기본" }, { id:"stacked", label:"누적" }, { id:"group", label:"그룹" }].map(s => (
+                      <span key={s.id} onClick={() => setBarStyle(s.id)} style={chipStyle(barStyle === s.id)}>{s.label}</span>
+                    ))}
+                  </>
+                )}
+                {ct === "pie" && (
+                  <>
+                    <span style={{ fontSize: 12, color: C.txS }}>모양</span>
+                    <span onClick={() => setDonut(false)} style={chipStyle(!donut)}>파이</span>
+                    <span onClick={() => setDonut(true)} style={chipStyle(donut)}>도넛</span>
+                  </>
+                )}
+                {(ct === "bar" || ct === "grouped") && (
+                  <>
+                    <span style={{ fontSize: 12, color: C.txS, marginLeft: 8 }}>집계</span>
+                    {[{ id:"count", label:"건수" }, { id:"sum", label:"합계" }, { id:"mean", label:"평균" }, { id:"max", label:"최댓값" }, { id:"min", label:"최솟값" }].map(m => (
+                      <span key={m.id} onClick={() => setBarMode(m.id)} style={chipStyle(barMode === m.id)}>{m.label}</span>
+                    ))}
+                    <span style={{ fontSize: 12, color: C.txS, marginLeft: 8 }}>값표시</span>
+                    <span onClick={() => setShowLabel(p => !p)} style={chipStyle(showLabel)}>{showLabel ? "켜짐" : "꺼짐"}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 차트 결과 */}
+          <ChartCard title={CHART_TYPES.find(t => t.id===ct)?.label || ""} subtitle="컬럼을 선택하면 차트가 표시됩니다">
+            {ct==="bar"     && catCol  ? <CustomBarChart     ds={ds} col={catCol} mode={barMode} barStyle={barStyle} showLabel={showLabel}/> : null}
+            {ct==="pie"     && catCol  ? <CustomPieChart     ds={ds} col={catCol} donut={donut}/> : null}
+            {ct==="hist"    && xCol    ? <CustomHistChart    ds={ds} col={xCol} hueCol={hueCol}/> : null}
+            {ct==="scatter" && xCol && yCol && xCol!==yCol ? <CustomScatterChart ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol}/> : null}
+            {ct==="line"    && xCol && yCol ? <CustomLineChart   ds={ds} xCol={xCol} yCol={yCol} hueCol={hueCol}/> : null}
+            {ct==="grouped" && catCol && numCol ? <CustomGroupedBar ds={ds} catCol={catCol} numCol={numCol} mode={barMode} showLabel={showLabel}/> : null}
+            {ct==="box"     && xCol    ? <CustomBoxPlot     ds={ds} col={xCol} groupCol={catCol || ""}/> : null}
+            {!(
+              (ct==="bar"&&catCol)||(ct==="pie"&&catCol)||(ct==="hist"&&xCol)||
+              (ct==="scatter"&&xCol&&yCol&&xCol!==yCol)||(ct==="line"&&xCol&&yCol)||
+              (ct==="grouped"&&catCol&&numCol)||(ct==="box"&&xCol)
+            ) && <div style={{ padding: 32, textAlign: "center", color: C.txT, fontSize: 13 }}>위에서 컬럼을 선택해 주세요.</div>}
+          </ChartCard>
+        </div>
+      )}
+    </div>
+  );
+}
