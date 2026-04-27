@@ -1,99 +1,192 @@
-import { useState, useRef, useCallback, useMemo } from "react";
-import { C } from "./constants";
-import { parseFile } from "./utils/dataUtils";
-import { FileCard } from "./components/FileCard";
-import { MergePanel, UnionPanel } from "./components/MergeUnion";
-import { DataInfoTab } from "./components/DataInfoTab";
-import { SummaryTab } from "./components/SummaryTab";
-import { PreprocessTab } from "./components/PreprocessTab";
-import { VizTab } from "./components/VizTab";
-import { EDATab } from "./components/EDATab";
-import { MLTab } from "./components/MLTab";
+import { useState, useCallback } from "react";
+import DataStudioApp from "./datastudio/DataStudioApp";
 
-export default function DataStudio(){
-  const [datasets,setDatasets]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [dragOver,setDragOver]=useState(false);
-  const [activeTab,setActiveTab]=useState("merge");
-  const [summaryResults,setSummaryResults]=useState([]);
-  const inputRef=useRef();
+// ── 앱 메뉴 정의 ──────────────────────────────────────────────────────────────
+const APPS = [
+  {
+    id: "datastudio",
+    icon: "📊",
+    label: "Data Studio",
+    desc: "CSV / Excel 파일 업로드 · 데이터 전처리 · 시각화 · Gemini EDA · ML/DL 분석",
+    tags: ["파일 분석", "ML/DL", "시각화", "EDA"],
+    accentColor: "#185FA5",
+    accentBg: "#E6F1FB",
+    ready: true,
+  },
+  {
+    id: "lifepeople",
+    icon: "🗺️",
+    label: "생활인구 분석",
+    desc: "서울시 생활인구 데이터 · 시간대별 · 연령별 · 행정동별 유동인구 분석",
+    tags: ["시간대 분석", "연령별", "지역별"],
+    accentColor: "#0F6E56",
+    accentBg: "#E1F5EE",
+    ready: false,
+  },
+  {
+    id: "migration",
+    icon: "🔀",
+    label: "인구 이동 분석",
+    desc: "지역 간 인구 이동 패턴 · 전입 / 전출 분석 · 이동 흐름 시각화",
+    tags: ["전입/전출", "이동 패턴", "지역 비교"],
+    accentColor: "#7F77DD",
+    accentBg: "#EEEDFE",
+    ready: false,
+  },
+];
 
-  const handleFiles=useCallback(async(files)=>{
-    setLoading(true);const results=[];
-    for(const file of files){try{results.push(await parseFile(file));}catch(e){alert(`${file.name} 파싱 실패: ${e.message}`);}}
-    setDatasets(prev=>[...prev,...results]);setLoading(false);
-    if(results.length)setActiveTab("merge");
-  },[]);
+// ── 홈 화면 ───────────────────────────────────────────────────────────────────
+function HomeScreen({ onSelect }) {
+  const [hovered, setHovered] = useState(null);
 
-  const onDrop=useCallback(e=>{
-    e.preventDefault();setDragOver(false);
-    const files=Array.from(e.dataTransfer.files).filter(f=>/\.(csv|xlsx|xls)$/i.test(f.name));
-    if(files.length)handleFiles(files);
-  },[handleFiles]);
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "var(--color-background-tertiary)",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "2rem 1rem", fontFamily: "var(--font-sans)",
+    }}>
+      {/* 헤더 */}
+      <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
+        <div style={{
+          width: 56, height: 56,
+          background: "var(--color-background-primary)",
+          borderRadius: "var(--border-radius-lg)",
+          border: "1.5px solid var(--color-border-secondary)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 26, margin: "0 auto 1rem",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+        }}>🧭</div>
+        <h1 style={{ fontSize: 24, fontWeight: 500, margin: "0 0 8px", color: "var(--color-text-primary)" }}>
+          분석 도구 모음
+        </h1>
+        <p style={{ fontSize: 14, color: "var(--color-text-secondary)", margin: 0 }}>
+          사용할 분석 도구를 선택하세요
+        </p>
+      </div>
 
-  const allDs=useMemo(()=>[...datasets,...summaryResults],[datasets,summaryResults]);
+      {/* 앱 카드 그리드 */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+        gap: 16, width: "100%", maxWidth: 780,
+      }}>
+        {APPS.map(app => {
+          const isHovered = hovered === app.id;
+          return (
+            <div
+              key={app.id}
+              onClick={() => app.ready && onSelect(app.id)}
+              onMouseEnter={() => setHovered(app.id)}
+              onMouseLeave={() => setHovered(null)}
+              style={{
+                background: "var(--color-background-primary)",
+                borderRadius: "var(--border-radius-lg)",
+                border: isHovered && app.ready
+                  ? "2px solid " + app.accentColor
+                  : "1.5px solid var(--color-border-secondary)",
+                padding: "1.75rem 1.5rem",
+                cursor: app.ready ? "pointer" : "default",
+                transition: "all 0.18s",
+                boxShadow: isHovered && app.ready
+                  ? "0 6px 20px " + app.accentColor + "22"
+                  : "0 1px 4px rgba(0,0,0,0.06)",
+                opacity: app.ready ? 1 : 0.65,
+                position: "relative",
+              }}
+            >
+              {!app.ready && (
+                <div style={{
+                  position: "absolute", top: 12, right: 12,
+                  fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
+                  background: "var(--color-background-warning)",
+                  color: "var(--color-text-warning)",
+                  border: "1px solid var(--color-text-warning)",
+                }}>준비중</div>
+              )}
+              <div style={{
+                width: 52, height: 52,
+                background: isHovered && app.ready ? app.accentColor : app.accentBg,
+                borderRadius: "var(--border-radius-md)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                marginBottom: "1.1rem", fontSize: 24, transition: "all 0.18s",
+              }}>{app.icon}</div>
+              <div style={{
+                fontSize: 16, fontWeight: 600, marginBottom: 6, transition: "color 0.18s",
+                color: isHovered && app.ready ? app.accentColor : "var(--color-text-primary)",
+              }}>{app.label}</div>
+              <div style={{
+                fontSize: 13, color: "var(--color-text-secondary)",
+                lineHeight: 1.65, marginBottom: "1.1rem",
+              }}>{app.desc}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {app.tags.map(t => (
+                  <span key={t} style={{
+                    fontSize: 11, fontWeight: 500, padding: "3px 9px", borderRadius: 20,
+                    background: app.accentBg, color: app.accentColor,
+                    border: "1px solid " + app.accentColor + "33",
+                  }}>{t}</span>
+                ))}
+              </div>
+              {app.ready && (
+                <div style={{
+                  marginTop: "1.1rem", fontSize: 12, fontWeight: 600,
+                  color: isHovered ? app.accentColor : "var(--color-text-tertiary)",
+                  transition: "color 0.18s",
+                }}>
+                  {isHovered ? "→ 시작하기" : "클릭하여 시작"}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
-  const handleUpdate=useCallback((updated,mode)=>{
-    if(mode==="add"){setDatasets(p=>[...p,updated]);}
-    else{setDatasets(p=>p.map(d=>d.id===updated.id?updated:d));}
-  },[]);
-
-  const hasData=datasets.length>0;
-
-  const NAV_TABS=[
-    {id:"merge",   label:"Merge / Union"},
-    {id:"files",   label:"파일 목록",   count:allDs.length},
-    {id:"info",    label:"Data Info",   disabled:!hasData},
-    {id:"summary", label:"데이터 요약", disabled:!hasData},
-    {id:"prep",    label:"전처리",      disabled:!hasData},
-    {id:"viz",     label:"📊 시각화",   disabled:!hasData},
-    {id:"eda",     label:"✨ EDA",      disabled:!hasData},
-    {id:"ml",      label:"🤖 ML/DL",   disabled:!hasData},
-  ];
-
-  return<div style={{maxWidth:960,margin:"0 auto",padding:"1.5rem 1rem",fontFamily:"var(--font-sans)"}}>
-    <div style={{marginBottom:20}}>
-      <h1 style={{fontSize:22,fontWeight:500,color:C.tx,margin:"0 0 4px"}}>Data Studio</h1>
-      <p style={{fontSize:13,color:C.txS,margin:0}}>CSV / Excel · Merge · Union · 전처리 · 요약 · 시각화 · EDA · ML/DL</p>
+      <div style={{ marginTop: "2rem", fontSize: 12, color: "var(--color-text-tertiary)", textAlign: "center" }}>
+        준비중 메뉴는 순차적으로 업데이트됩니다
+      </div>
     </div>
+  );
+}
 
-    {/* Upload */}
-    <div onDrop={onDrop} onDragOver={e=>{e.preventDefault();setDragOver(true);}} onDragLeave={()=>setDragOver(false)} onClick={()=>inputRef.current?.click()}
-      style={{border:`1.5px dashed ${dragOver?C.infoTx:C.bdS}`,borderRadius:"var(--border-radius-lg)",padding:"22px 20px",textAlign:"center",cursor:"pointer",background:dragOver?C.info:C.bgS,transition:"all 0.15s",marginBottom:18}}>
-      <input ref={inputRef} type="file" multiple accept=".csv,.xlsx,.xls" onChange={e=>{handleFiles(Array.from(e.target.files));e.target.value="";}} style={{display:"none"}}/>
-      <div style={{fontSize:20,marginBottom:6}}>📂</div>
-      <div style={{fontSize:14,fontWeight:500,color:C.tx,marginBottom:3}}>파일을 드래그하거나 클릭하여 업로드</div>
-      <div style={{fontSize:12,color:C.txS}}>CSV · Excel (.xlsx, .xls) · 여러 파일 동시 가능</div>
+// ── 메인 App ──────────────────────────────────────────────────────────────────
+//
+// ⚠️ 핵심: display 토글 방식 사용
+//
+// 문제: if/return 조건부 렌더링을 쓰면 앱 전환 시 컴포넌트가 언마운트(unmount)되어
+//       업로드한 파일, 선택한 탭, 분석 결과 등 내부 state가 전부 초기화됩니다.
+//
+// 해결: 모든 앱을 항상 마운트(mount)해두고 display:none / display:block으로
+//       화면 전환만 합니다. DOM은 살아있으므로 state가 완전히 보존됩니다.
+//
+export default function App() {
+  const [currentApp, setCurrentApp] = useState(null); // null = 홈화면
+
+  const goHome = useCallback(() => setCurrentApp(null), []);
+  const goApp  = useCallback((id) => setCurrentApp(id), []);
+
+  return (
+    <div>
+      {/* 홈 화면 */}
+      <div style={{ display: currentApp === null ? "block" : "none" }}>
+        <HomeScreen onSelect={goApp} />
+      </div>
+
+      {/* Data Studio — 항상 마운트, 숨김만 전환 */}
+      <div style={{ display: currentApp === "datastudio" ? "block" : "none" }}>
+        <DataStudioApp onBack={goHome} />
+      </div>
+
+      {/* 추후 앱 추가 시 아래 주석 해제 */}
+      {/*
+      <div style={{ display: currentApp === "lifepeople" ? "block" : "none" }}>
+        <LifePeopleApp onBack={goHome} />
+      </div>
+      <div style={{ display: currentApp === "migration" ? "block" : "none" }}>
+        <MigrationApp onBack={goHome} />
+      </div>
+      */}
     </div>
-
-    {loading&&<div style={{textAlign:"center",padding:14,color:C.txS,fontSize:14}}>파일 분석 중...</div>}
-
-    {/* Nav */}
-    <div style={{display:"flex",gap:0,marginBottom:18,borderBottom:`0.5px solid ${C.bd}`,overflowX:"auto"}}>
-      {NAV_TABS.map(t=><button key={t.id} onClick={()=>!t.disabled&&setActiveTab(t.id)} disabled={t.disabled}
-        style={{fontSize:13,padding:"9px 12px",cursor:t.disabled?"not-allowed":"pointer",background:"transparent",border:"none",borderBottom:activeTab===t.id?`2px solid ${C.infoTx}`:"2px solid transparent",color:t.disabled?C.txT:activeTab===t.id?C.infoTx:C.txS,fontWeight:activeTab===t.id?500:400,display:"flex",alignItems:"center",gap:5,marginBottom:-0.5,opacity:t.disabled?0.4:1,whiteSpace:"nowrap"}}>
-        {t.label}
-        {t.count!==undefined&&t.count>0&&<span style={{fontSize:11,padding:"1px 6px",borderRadius:10,background:activeTab===t.id?C.info:C.bgS,color:activeTab===t.id?C.infoTx:C.txS}}>{t.count}</span>}
-      </button>)}
-    </div>
-
-    {/* Empty */}
-    {!hasData&&!loading&&activeTab!=="merge"&&<div style={{textAlign:"center",padding:"48px 24px",color:C.txT,fontSize:14,border:`0.5px solid ${C.bd}`,borderRadius:"var(--border-radius-lg)"}}>파일을 업로드해 주세요.</div>}
-
-    {/* Merge / Union */}
-    {activeTab==="merge"&&<div>
-      {datasets.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.txT,fontSize:13,border:`0.5px solid ${C.bd}`,borderRadius:"var(--border-radius-lg)",marginBottom:14}}>파일을 업로드하면 Merge / Union을 진행할 수 있습니다.</div>}
-      {datasets.length===1&&<div style={{marginBottom:14}}><div style={{padding:"12px 16px",background:C.info,borderRadius:"var(--border-radius-md)",fontSize:13,color:C.infoTx,marginBottom:10}}>파일 1개 업로드됨 — 파일을 추가해 Merge / Union을 진행하세요.</div><FileCard dataset={datasets[0]} isMergeResult={false} onRemove={()=>setDatasets([])}/></div>}
-      {datasets.length>=2&&<MergePanel datasets={datasets} onResult={r=>{setDatasets(p=>[...p,r]);setActiveTab("files");}}/>}
-      {datasets.length>=2&&<UnionPanel datasets={datasets} onResult={r=>{setDatasets(p=>[...p,r]);setActiveTab("files");}}/>}
-    </div>}
-
-    {activeTab==="files"&&allDs.map((ds,i)=><FileCard key={ds.id} dataset={ds} isMergeResult={!!ds.isMerged} onRemove={()=>{setDatasets(p=>p.filter(d=>d.id!==ds.id));setSummaryResults(p=>p.filter(d=>d.id!==ds.id));}}/>)}
-    {activeTab==="info"&&hasData&&<DataInfoTab datasets={allDs} onUpdate={handleUpdate}/>}
-    {activeTab==="summary"&&hasData&&<SummaryTab datasets={allDs} onResult={r=>{setSummaryResults(p=>[...p,r]);}}/>}
-    {activeTab==="prep"&&hasData&&<PreprocessTab datasets={datasets} onUpdate={d=>setDatasets(p=>p.map(x=>x.id===d.id?d:x))}/>}
-    {activeTab==="viz"&&hasData&&<VizTab allDs={allDs}/>}
-    {activeTab==="eda"&&hasData&&<EDATab allDs={allDs} summaryResults={summaryResults}/>}
-    {activeTab==="ml"&&hasData&&<MLTab allDs={allDs} apiKey={sessionStorage.getItem("gemini_key")||""}/>}
-  </div>;
+  );
 }
