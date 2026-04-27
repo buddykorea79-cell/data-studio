@@ -234,7 +234,7 @@ export function EDATab({ allDs, summaryResults }) {
           {ds && (
             <div style={{ fontSize: 11, color: C.txS, background: C.bgS, padding: "8px 10px",
               borderRadius: "var(--border-radius-md)", marginBottom: 12 }}>
-              📤 전송: {sendMode === "stats" ? "통계만" : sendMode === "summary" ? "요약 테이블" : `샘플 ${Math.min(sampleN, ds.rowCount)}행`} · 모델: gemini-2.0-flash-lite
+              📤 전송: {sendMode === "stats" ? "통계만" : sendMode === "summary" ? "요약 테이블" : `샘플 ${Math.min(sampleN, ds.rowCount)}행`} · 모델: gemini-3.1-flash-lite-preview
             </div>
           )}
 
