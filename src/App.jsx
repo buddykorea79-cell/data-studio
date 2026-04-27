@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import DataStudioApp from "./datastudio/DataStudioApp";
 
 // ── 앱 메뉴 정의 ──────────────────────────────────────────────────────────────
@@ -35,6 +35,8 @@ const APPS = [
   },
 ];
 
+const SESSION_KEY = "ds_current_app";
+
 // ── 홈 화면 ───────────────────────────────────────────────────────────────────
 function HomeScreen({ onSelect }) {
   const [hovered, setHovered] = useState(null);
@@ -47,7 +49,6 @@ function HomeScreen({ onSelect }) {
       alignItems: "center", justifyContent: "center",
       padding: "2rem 1rem", fontFamily: "var(--font-sans)",
     }}>
-      {/* 헤더 */}
       <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
         <div style={{
           width: 56, height: 56,
@@ -66,7 +67,6 @@ function HomeScreen({ onSelect }) {
         </p>
       </div>
 
-      {/* 앱 카드 그리드 */}
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -151,20 +151,27 @@ function HomeScreen({ onSelect }) {
 }
 
 // ── 메인 App ──────────────────────────────────────────────────────────────────
-//
-// ⚠️ 핵심: display 토글 방식 사용
-//
-// 문제: if/return 조건부 렌더링을 쓰면 앱 전환 시 컴포넌트가 언마운트(unmount)되어
-//       업로드한 파일, 선택한 탭, 분석 결과 등 내부 state가 전부 초기화됩니다.
-//
-// 해결: 모든 앱을 항상 마운트(mount)해두고 display:none / display:block으로
-//       화면 전환만 합니다. DOM은 살아있으므로 state가 완전히 보존됩니다.
-//
 export default function App() {
-  const [currentApp, setCurrentApp] = useState(null); // null = 홈화면
+  // ✅ 핵심 수정: sessionStorage로 currentApp 상태 영속화
+  // App이 리마운트되거나 HMR이 발생해도 이전 선택이 복원됨
+  const [currentApp, setCurrentApp] = useState(() => {
+    try {
+      return sessionStorage.getItem(SESSION_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
 
-  const goHome = useCallback(() => setCurrentApp(null), []);
-  const goApp  = useCallback((id) => setCurrentApp(id), []);
+  // currentApp 변경 시 sessionStorage에도 저장
+  const goHome = useCallback(() => {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+    setCurrentApp(null);
+  }, []);
+
+  const goApp = useCallback((id) => {
+    try { sessionStorage.setItem(SESSION_KEY, id); } catch {}
+    setCurrentApp(id);
+  }, []);
 
   return (
     <div>
@@ -173,13 +180,12 @@ export default function App() {
         <HomeScreen onSelect={goApp} />
       </div>
 
-      {/* Data Studio — 항상 마운트, 숨김만 전환 */}
+      {/* Data Studio — 항상 마운트, display로만 전환 */}
       <div style={{ display: currentApp === "datastudio" ? "block" : "none" }}>
         <DataStudioApp onBack={goHome} />
       </div>
 
-      {/* 추후 앱 추가 시 아래 주석 해제 */}
-      {/*
+      {/* 추후 앱 추가 시 아래 주석 해제
       <div style={{ display: currentApp === "lifepeople" ? "block" : "none" }}>
         <LifePeopleApp onBack={goHome} />
       </div>
