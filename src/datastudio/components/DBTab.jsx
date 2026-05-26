@@ -3,10 +3,8 @@ import { C } from "../../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
 
 const MODELS = [
-  { id: "google/gemma-3-12b-it:free",                    label: "Gemma 3 12B (무료)" },
-  { id: "mistralai/mistral-7b-instruct:free",            label: "Mistral 7B (무료)" },
-  { id: "microsoft/phi-3-mini-128k-instruct:free",       label: "Phi-3 Mini (무료)" },
-  { id: "meta-llama/llama-3.1-8b-instruct:free",         label: "Llama 3.1 8B (무료)" },
+  { id: "deepseek/deepseek-v4-flash:free", label: "DeepSeek V4 Flash (무료)" },
+  { id: "google/gemma-4-26b-a4b:free",     label: "Gemma 4 26B A4B (무료)" },
 ];
 
 async function callOpenRouter(apiKey, model, systemPrompt, userMsg) {
@@ -57,7 +55,6 @@ export function DBTab({ allDs }) {
   const [sqlReady, setSqlReady]       = useState(false);
   const [sqlError, setSqlError]       = useState("");
   const dbRef                          = useRef(null);
-  const SQLRef                         = useRef(null);
 
   const [tables,   setTables]         = useState([]);
   const [selDsId,  setSelDsId]        = useState(() => allDs[0]?.id ?? "");
@@ -69,22 +66,19 @@ export function DBTab({ allDs }) {
   const [showKey,  setShowKey]        = useState(false);
   const [model,    setModel]          = useState(MODELS[0].id);
   const [query,    setQuery]          = useState("");
-  const [genSQL,   setGenSQL]         = useState("");
   const [editSQL,  setEditSQL]        = useState("");
   const [results,  setResults]        = useState(null);
   const [history,  setHistory]        = useState([]);
   const [loading,  setLoading]        = useState(false);
   const [error,    setError]          = useState("");
   const [activeTab,setActiveTab]      = useState("import");
-  const [schemaView,setSchemaView]    = useState(false);
 
   // ── Init sql.js ─────────────────────────────────────────────────────────────
   useEffect(() => {
     import("sql.js").then(({ default: initSqlJs }) =>
       initSqlJs({ locateFile: () => "/sql-wasm.wasm" })
     ).then(SQL => {
-      SQLRef.current = SQL;
-      dbRef.current  = new SQL.Database();
+      dbRef.current = new SQL.Database();
       setSqlReady(true);
     }).catch(e => setSqlError(`sql.js 로드 실패: ${e.message}`));
   }, []);
@@ -170,7 +164,7 @@ export function DBTab({ allDs }) {
 ${schema}`;
       const raw = await callOpenRouter(apiKey.trim(), model, sys, query);
       const sql = extractSQL(raw);
-      setGenSQL(sql); setEditSQL(sql);
+      setEditSQL(sql);
     } catch (e) {
       setError(`SQL 생성 실패: ${e.message}`);
     } finally {
