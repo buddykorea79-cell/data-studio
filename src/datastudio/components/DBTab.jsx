@@ -3,8 +3,8 @@ import { C } from "../../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
 
 const MODELS = [
-  { id: "deepseek/deepseek-chat-v3-0324:free", label: "DeepSeek V3 (무료)" },
-  { id: "google/gemma-3-27b-it:free",          label: "Gemma 3 27B (무료)" },
+  { id: "deepseek/deepseek-v4-flash",          label: "DeepSeek V4 Flash" },
+  { id: "google/gemini-2.5-flash-lite",        label: "Gemini 2.5 Flash Lite" },
 ];
 
 async function callOpenRouter(apiKey, model, systemPrompt, userMsg) {
