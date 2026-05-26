@@ -11,16 +11,16 @@ export const C = {
 };
 
 export const TYPE_CLR = {
-  number:  { bg:"#E6F1FB", tx:"#0C447C" },
-  category:{ bg:"#EEEDFE", tx:"#3C3489" },
-  text:    { bg:"#F1EFE8", tx:"#444441" },
-  date:    { bg:"#EAF3DE", tx:"#27500A" },
-  empty:   { bg:"#FAEEDA", tx:"#633806" },
+  number:  { bg:"#E3EDF4", tx:"#3A6F8F" },
+  category:{ bg:"#E3F1E8", tx:"#2D7A4F" },
+  text:    { bg:"#F7FAF6", tx:"#4A6354" },
+  date:    { bg:"#E8F1E7", tx:"#2E4D3D" },
+  empty:   { bg:"#FAF1DC", tx:"#B8862C" },
 };
 
 export const ALL_TYPES = ["number","category","text","date","empty"];
 
 export const PALETTE = [
-  "#378ADD","#1D9E75","#D85A30","#7F77DD","#BA7517",
-  "#D4537E","#639922","#185FA5","#0F6E56","#993C1D",
+  "#4A7560","#3A6F8F","#B8862C","#C44545","#6B8F7A",
+  "#7F77DD","#2D7A4F","#D4537E","#2E4D3D","#A8C2B2",
 ];

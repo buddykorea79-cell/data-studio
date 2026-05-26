@@ -1,47 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--color-background-tertiary); }
+body { font-family: var(--font-sans); background: var(--color-background-tertiary); -webkit-font-smoothing: antialiased; }
+
 :root {
-  --color-background-primary:   #ffffff;
-  --color-background-secondary: #f5f5f4;
-  --color-background-tertiary:  #eeede9;
-  --color-background-info:      #e6f1fb;
-  --color-background-success:   #eaf3de;
-  --color-background-warning:   #faeeda;
-  --color-background-danger:    #fcebeb;
-  --color-text-primary:         #1a1a18;
-  --color-text-secondary:       #5f5e5a;
-  --color-text-tertiary:        #b4b2a9;
-  --color-text-info:            #185fa5;
-  --color-text-success:         #0f6e56;
-  --color-text-warning:         #ba7517;
-  --color-text-danger:          #a32d2d;
-  --color-border-tertiary:      rgba(0,0,0,0.10);
-  --color-border-secondary:     rgba(0,0,0,0.18);
-  --color-border-primary:       rgba(0,0,0,0.28);
-  --border-radius-md:           8px;
-  --border-radius-lg:           12px;
-  --border-radius-xl:           16px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", "Fira Code", Consolas, monospace;
+  /* Sage & Forest palette */
+  --color-background-primary:   #FFFFFF;
+  --color-background-secondary: #F7FAF6;
+  --color-background-tertiary:  #F2F7F1;
+  --color-background-info:      #E3EDF4;
+  --color-background-success:   #E3F1E8;
+  --color-background-warning:   #FAF1DC;
+  --color-background-danger:    #FAE3E3;
+
+  --color-text-primary:         #1A2E24;
+  --color-text-secondary:       #4A6354;
+  --color-text-tertiary:        #6B7F70;
+  --color-text-info:            #3A6F8F;
+  --color-text-success:         #2D7A4F;
+  --color-text-warning:         #B8862C;
+  --color-text-danger:          #C44545;
+
+  --color-border-tertiary:      #D6DDD4;
+  --color-border-secondary:     #B8C4B6;
+  --color-border-primary:       #4A7560;
+
+  --color-primary-900: #1A2E24;
+  --color-primary-700: #2E4D3D;
+  --color-primary-600: #3A5F4C;
+  --color-primary-500: #4A7560;
+  --color-primary-400: #6B8F7A;
+  --color-primary-300: #A8C2B2;
+
+  --border-radius-md:  8px;
+  --border-radius-lg:  12px;
+  --border-radius-xl:  16px;
+
+  --font-display: 'Fraunces', 'Pretendard Variable', 'Pretendard', ui-serif, Georgia, serif;
+  --font-sans:    'Inter', 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', 'D2Coding', 'SF Mono', Menlo, Consolas, monospace;
+
+  --shadow-xs:    0 1px 2px rgba(26,46,36,0.06);
+  --shadow-sm:    0 1px 3px rgba(26,46,36,0.06), 0 1px 2px rgba(26,46,36,0.04);
+  --shadow-md:    0 4px 8px rgba(26,46,36,0.08), 0 2px 4px rgba(26,46,36,0.05);
+  --shadow-focus: 0 0 0 3px rgba(46,77,61,0.18);
 }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--color-background-secondary); }
+::-webkit-scrollbar-thumb { background: var(--color-primary-300); border-radius: 999px; border: 2px solid var(--color-background-secondary); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-primary-400); }
+::selection { background: var(--color-primary-300); color: var(--color-primary-900); }
+
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-background-primary:   #1c1c1a;
-    --color-background-secondary: #252523;
-    --color-background-tertiary:  #2c2c2a;
-    --color-background-info:      #0c2d4a;
-    --color-background-success:   #0a2e22;
-    --color-background-warning:   #3a2a08;
-    --color-background-danger:    #3a1010;
-    --color-text-primary:         #e8e7e3;
-    --color-text-secondary:       #a0a09a;
-    --color-text-tertiary:        #5a5a55;
-    --color-text-info:            #85b7eb;
-    --color-text-success:         #5dcaa5;
-    --color-text-warning:         #ef9f27;
-    --color-text-danger:          #f09595;
-    --color-border-tertiary:      rgba(255,255,255,0.10);
-    --color-border-secondary:     rgba(255,255,255,0.18);
-    --color-border-primary:       rgba(255,255,255,0.28);
+    --color-background-primary:   #243D30;
+    --color-background-secondary: #1A2E24;
+    --color-background-tertiary:  #152618;
+    --color-background-info:      #1A2E3D;
+    --color-background-success:   #162A1E;
+    --color-background-warning:   #2E2410;
+    --color-background-danger:    #2E1010;
+    --color-text-primary:         #E8F1E7;
+    --color-text-secondary:       #A8C2B2;
+    --color-text-tertiary:        #6B8F7A;
+    --color-text-info:            #7EB8D4;
+    --color-text-success:         #5DC98F;
+    --color-text-warning:         #EFC060;
+    --color-text-danger:          #E88080;
+    --color-border-tertiary:      rgba(168,194,178,0.15);
+    --color-border-secondary:     rgba(168,194,178,0.25);
+    --color-border-primary:       rgba(168,194,178,0.45);
+    --color-primary-300: #4A7560;
+    --color-primary-400: #6B8F7A;
   }
 }

@@ -9,6 +9,7 @@ import { PreprocessTab }     from "./components/PreprocessTab";
 import { VizTab }            from "./components/VizTab";
 import { EDATab }            from "./components/EDATab";
 import { MLTab }             from "./components/MLTab";
+import { DBTab }             from "./components/DBTab";
 
 const TAB_KEY = "ds_active_tab";
 
@@ -79,6 +80,7 @@ export default function DataStudioApp({ onBack = null }) {
     { id: "info",    label: "Data Info",   disabled: !hasData },
     { id: "summary", label: "데이터 요약", disabled: !hasData },
     { id: "prep",    label: "전처리",      disabled: !hasData },
+    { id: "db",      label: "🗄️ DB 분석",   disabled: !hasData },
     { id: "viz",     label: "📊 시각화",   disabled: !hasData },
     { id: "eda",     label: "✨ EDA",      disabled: !hasData },
     { id: "ml",      label: "🤖 ML/DL",   disabled: !hasData },
@@ -243,6 +245,7 @@ export default function DataStudioApp({ onBack = null }) {
       {activeTab === "info"    && hasData && <DataInfoTab datasets={allDs} onUpdate={handleUpdate} />}
       {activeTab === "summary" && hasData && <SummaryTab  datasets={allDs} onResult={r => setSummaryResults(p => [...p, r])} />}
       {activeTab === "prep"    && hasData && <PreprocessTab datasets={datasets} onUpdate={d => setDatasets(p => p.map(x => x.id === d.id ? d : x))} />}
+      {activeTab === "db"      && hasData && <DBTab   allDs={allDs} />}
       {activeTab === "viz"     && hasData && <VizTab  allDs={allDs} />}
       {activeTab === "eda"     && hasData && <EDATab  allDs={allDs} summaryResults={summaryResults} />}
       {activeTab === "ml"      && hasData && <MLTab   allDs={allDs} apiKey={sessionStorage.getItem("gemini_key") || ""} />}
