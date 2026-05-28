@@ -1,4 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+
+export const APP_VERSION = "v1.3.0";
+export const APP_BUILD   = "2026-05-28";
 import { C } from "../constants";
 import { parseFile } from "../utils/dataUtils";
 import { FileCard }          from "./components/FileCard";
@@ -249,6 +252,25 @@ export default function DataStudioApp({ onBack = null }) {
       {activeTab === "viz"     && hasData && <VizTab  allDs={allDs} />}
       {activeTab === "eda"     && hasData && <EDATab  allDs={allDs} summaryResults={summaryResults} />}
       {activeTab === "ml"      && hasData && <MLTab   allDs={allDs} apiKey={sessionStorage.getItem("gemini_key") || ""} />}
+
+      {/* 버전 정보 */}
+      <div style={{
+        marginTop: 32, paddingTop: 12,
+        borderTop: "0.5px solid " + C.bd,
+        display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ fontSize: 11, color: C.txT, fontFamily: "var(--font-mono)" }}>
+          Data Studio {APP_VERSION}
+        </span>
+        <span style={{ fontSize: 10, color: C.txT }}>·</span>
+        <span style={{ fontSize: 11, color: C.txT }}>
+          인코딩 자동 감지 (UTF-8 / EUC-KR)
+        </span>
+        <span style={{ fontSize: 10, color: C.txT }}>·</span>
+        <span style={{ fontSize: 11, color: C.txT, fontFamily: "var(--font-mono)" }}>
+          {APP_BUILD}
+        </span>
+      </div>
     </div>
   );
 }

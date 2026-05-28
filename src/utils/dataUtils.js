@@ -49,38 +49,31 @@ export function makeDataset(id, name, rows, extra = {}) {
   return { id, name, rows, columns, colMeta: buildColMeta(rows, columns), rowCount: rows.length, ...extra };
 }
 
-// ── CSV encoding detection ──────────────────────────────────────────────────
-// UTF-8 → EUC-KR(CP949) 순으로 시도. 치환문자(U+FFFD) 비율이 낮은 쪽을 선택.
+// ── CSV encoding detection ────────────────────────────────────────────────────
+// strict UTF-8 파싱 실패 시 EUC-KR/CP949 fallback (한글 엑셀 기본 저장 인코딩)
 function decodeCsvBuffer(buffer) {
   const bytes = new Uint8Array(buffer);
 
-  // UTF-8 BOM 확인
+  // UTF-8 BOM (EF BB BF)
   if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
     return new TextDecoder("utf-8").decode(bytes.slice(3));
   }
 
-  const tryDecode = (enc) => {
-    try {
-      const text = new TextDecoder(enc, { fatal: false }).decode(bytes);
-      const replacements = (text.match(/�/g) || []).length;
-      return { text, ratio: replacements / Math.max(text.length, 1) };
-    } catch {
-      return null;
-    }
-  };
+  // strict UTF-8: 유효하면 즉시 반환
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch { /* not valid UTF-8 */ }
 
-  const candidates = [
-    tryDecode("utf-8"),
-    tryDecode("euc-kr"),
-    tryDecode("windows-1252"),
-  ].filter(Boolean);
+  // EUC-KR / CP949
+  try {
+    return new TextDecoder("euc-kr", { fatal: true }).decode(bytes);
+  } catch { /* not valid EUC-KR */ }
 
-  // 치환문자 비율이 가장 낮은 디코딩 선택
-  candidates.sort((a, b) => a.ratio - b.ratio);
-  return candidates[0]?.text ?? new TextDecoder("utf-8").decode(bytes);
+  // 최후 fallback
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
-// 간단한 CSV 파서 (따옴표 안의 쉼표/개행 처리)
+// CSV 파서: 따옴표 안의 쉼표/개행 처리
 function parseCsvText(text) {
   const rows = [];
   let cur = "", row = [], inQuotes = false;
