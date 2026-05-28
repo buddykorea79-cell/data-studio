@@ -2,7 +2,7 @@ import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { C, PALETTE } from "../../constants";
+import { C, PALETTE } from "../constants";
 
 // 대용량 배열 안전 min/max (spread 대신 reduce 사용)
 function safeMin(arr) { return arr.reduce((m, v) => v < m ? v : m, Infinity); }

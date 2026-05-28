@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { C } from "../../constants";
+import { C } from "../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
 
 const MODELS = [

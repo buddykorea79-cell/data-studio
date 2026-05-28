@@ -4,15 +4,15 @@ export const APP_VERSION = "v1.3.0";
 export const APP_BUILD   = "2026-05-28";
 import { C } from "../constants";
 import { parseFile } from "../utils/dataUtils";
-import { FileCard }          from "./components/FileCard";
-import { MergePanel, UnionPanel } from "./components/MergeUnion";
-import { DataInfoTab }       from "./components/DataInfoTab";
-import { SummaryTab }        from "./components/SummaryTab";
-import { PreprocessTab }     from "./components/PreprocessTab";
-import { VizTab }            from "./components/VizTab";
-import { EDATab }            from "./components/EDATab";
-import { MLTab }             from "./components/MLTab";
-import { DBTab }             from "./components/DBTab";
+import { FileCard }          from "./FileCard";
+import { MergePanel, UnionPanel } from "./MergeUnion";
+import { DataInfoTab }       from "./DataInfoTab";
+import { SummaryTab }        from "./SummaryTab";
+import { PreprocessTab }     from "./PreprocessTab";
+import { VizTab }            from "./VizTab";
+import { EDATab }            from "./EDATab";
+import { MLTab }             from "./MLTab";
+import { DBTab }             from "./DBTab";
 
 const TAB_KEY = "ds_active_tab";
 

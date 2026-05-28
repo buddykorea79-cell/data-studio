@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { C } from "../../constants";
+import { C } from "../constants";
 import { Btn } from "./UI";
-import { performJoin, performUnion } from "../../utils/dataUtils";
+import { performJoin, performUnion } from "../utils/dataUtils";
 
 export function MergePanel({ datasets, onResult }) {
   const [lIdx, setLIdx] = useState(0);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { C, TYPE_CLR } from "../../constants";
+import { C, TYPE_CLR } from "../constants";
 
 export function TypeBadge({ type }) {
   const clr = TYPE_CLR[type] || TYPE_CLR.text;

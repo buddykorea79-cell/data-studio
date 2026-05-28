@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { C, TYPE_CLR } from "../../constants";
+import { C, TYPE_CLR } from "../constants";
 import { Btn, DsSelector, MdBlock } from "./UI";
-import { callGemini } from "../../utils/mlUtils";
+import { callGemini } from "../utils/mlUtils";
 import {
   getNumCols, getCatCols, ChartCard,
   HistChart, BarFreq, PieFreq, CorrHeatmap, MissingChart, GroupedBar,

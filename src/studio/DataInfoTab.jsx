@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { C } from "../../constants";
-import { makeDataset, buildColMeta } from "../../utils/dataUtils";
+import { C } from "../constants";
+import { makeDataset, buildColMeta } from "../utils/dataUtils";
 import { StatCard, Btn, Section, DsSelector, DataTable } from "./UI";
 import { TypeBadge } from "./UI";
 

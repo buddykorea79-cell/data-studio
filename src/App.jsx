@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import DataStudioApp from "./datastudio/DataStudioApp";
+import DataStudioApp from "./studio/Studio";
 
 // ── 앱 메뉴 정의 ──────────────────────────────────────────────────────────────
 const APPS = [

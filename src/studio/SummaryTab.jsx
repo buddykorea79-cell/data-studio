@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { C } from "../../constants";
-import { performGroup, performPivot, downloadCSV } from "../../utils/dataUtils";
+import { C } from "../constants";
+import { performGroup, performPivot, downloadCSV } from "../utils/dataUtils";
 import { Btn, Section, DsSelector, DataTable } from "./UI";
 
 export function SummaryTab({datasets,onResult}) {

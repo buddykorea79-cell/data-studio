@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo } from "react";
-import { C, ALL_TYPES } from "../../constants";
-import { buildColMeta } from "../../utils/dataUtils";
+import { C, ALL_TYPES } from "../constants";
+import { buildColMeta } from "../utils/dataUtils";
 import { TypeBadge, Btn, Section, DataTable, DsSelector } from "./UI";
 
 export function PreprocessTab({datasets,onUpdate}) {

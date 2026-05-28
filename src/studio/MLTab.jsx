@@ -1,11 +1,11 @@
 import { useState, useRef } from "react";
 import { BarChart, Bar, LineChart, Line, ScatterChart, Scatter,
   Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { C, PALETTE } from "../../constants";
+import { C, PALETTE } from "../constants";
 import { Btn, Section, DsSelector, MdBlock } from "./UI";
 import { normalize, denorm, prepareFeatures, trainTestSplit,
   linearRegression, logisticRegression, kmeans, mlp, sigmoid, relu, softmax, callGemini,
-} from "../../utils/mlUtils";
+} from "../utils/mlUtils";
 
 // ── Grade helpers ─────────────────────────────────────────────────────────────
 function gradeR2(v) {

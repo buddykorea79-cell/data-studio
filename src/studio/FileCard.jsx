@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { C } from "../../constants";
-import { downloadCSV } from "../../utils/dataUtils";
+import { C } from "../constants";
+import { downloadCSV } from "../utils/dataUtils";
 import { TypeBadge, StatCard, Btn, DataTable } from "./UI";
 
 export function FileCard({dataset,onRemove,isMergeResult}){

@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { C, PALETTE } from "../../constants";
+import { C, PALETTE } from "../constants";
 import { DsSelector } from "./UI";
 
 function getNumCols(ds){return ds.colMeta.filter(c=>c.type==="number");}
