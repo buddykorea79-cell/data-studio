@@ -49,6 +49,60 @@ export function makeDataset(id, name, rows, extra = {}) {
   return { id, name, rows, columns, colMeta: buildColMeta(rows, columns), rowCount: rows.length, ...extra };
 }
 
+// ── CSV encoding detection ──────────────────────────────────────────────────
+// UTF-8 → EUC-KR(CP949) 순으로 시도. 치환문자(U+FFFD) 비율이 낮은 쪽을 선택.
+function decodeCsvBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+
+  // UTF-8 BOM 확인
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return new TextDecoder("utf-8").decode(bytes.slice(3));
+  }
+
+  const tryDecode = (enc) => {
+    try {
+      const text = new TextDecoder(enc, { fatal: false }).decode(bytes);
+      const replacements = (text.match(/�/g) || []).length;
+      return { text, ratio: replacements / Math.max(text.length, 1) };
+    } catch {
+      return null;
+    }
+  };
+
+  const candidates = [
+    tryDecode("utf-8"),
+    tryDecode("euc-kr"),
+    tryDecode("windows-1252"),
+  ].filter(Boolean);
+
+  // 치환문자 비율이 가장 낮은 디코딩 선택
+  candidates.sort((a, b) => a.ratio - b.ratio);
+  return candidates[0]?.text ?? new TextDecoder("utf-8").decode(bytes);
+}
+
+// 간단한 CSV 파서 (따옴표 안의 쉼표/개행 처리)
+function parseCsvText(text) {
+  const rows = [];
+  let cur = "", row = [], inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") { row.push(cur); cur = ""; }
+      else if (ch === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+      else if (ch === "\r") { /* skip */ }
+      else cur += ch;
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.some(c => c !== ""));
+}
+
 // ── File parsing ──────────────────────────────────────────────────────────────
 export function parseFile(file) {
   return new Promise((resolve, reject) => {
@@ -58,13 +112,11 @@ export function parseFile(file) {
       try {
         let rows = [];
         if (ext === "csv") {
-          const text = typeof e.target.result === "string"
-            ? e.target.result
-            : new TextDecoder().decode(e.target.result);
-          const lines = text.split(/\r?\n/).filter(l => l.trim());
-          const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
-          rows = lines.slice(1).map(line => {
-            const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+          const text = decodeCsvBuffer(e.target.result);
+          const parsed = parseCsvText(text);
+          if (!parsed.length) { resolve(makeDataset(crypto.randomUUID(), file.name, [])); return; }
+          const headers = parsed[0].map(h => String(h).trim());
+          rows = parsed.slice(1).map(vals => {
             const row = {};
             headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
             return row;
@@ -82,8 +134,8 @@ export function parseFile(file) {
         resolve(makeDataset(crypto.randomUUID(), file.name, rows));
       } catch (err) { reject(err); }
     };
-    if (ext === "csv") reader.readAsText(file);
-    else reader.readAsArrayBuffer(file);
+    reader.onerror = () => reject(new Error("파일 읽기 실패"));
+    reader.readAsArrayBuffer(file);
   });
 }
 
