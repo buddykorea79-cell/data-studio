@@ -4,10 +4,21 @@ import DataStudioApp from "./studio/Studio";
 // ── 앱 메뉴 정의 ──────────────────────────────────────────────────────────────
 const APPS = [
   {
+    id: "edutalk",
+    icon: "🎓",
+    label: "EduTalk",
+    desc: "AI 기반 학습 대화 플랫폼 · 질문하고 배우는 교육 챗봇",
+    tags: ["AI 학습", "대화형", "교육"],
+    accentColor: "#C05A00",
+    accentBg: "#FFF0E0",
+    ready: true,
+    href: "https://buddybuddy-sle9.onrender.com/",
+  },
+  {
     id: "datastudio",
     icon: "📊",
     label: "Data Studio",
-    desc: "CSV / Excel 파일 업로드 · 데이터 전처리 · 시각화 · Gemini EDA · ML/DL 분석",
+    desc: "CSV / Excel 파일 업로드 · 데이터 전처리 · 시각화 · AI EDA · ML/DL 분석",
     tags: ["파일 분석", "ML/DL", "시각화", "EDA"],
     accentColor: "#185FA5",
     accentBg: "#E6F1FB",
@@ -58,26 +69,29 @@ function HomeScreen({ onSelect }) {
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 26, margin: "0 auto 1rem",
           boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-        }}>🧭</div>
+        }}>🛝</div>
         <h1 style={{ fontSize: 24, fontWeight: 500, margin: "0 0 8px", color: "var(--color-text-primary)" }}>
-          분석 도구 모음
+          그냥이의 놀이터
         </h1>
         <p style={{ fontSize: 14, color: "var(--color-text-secondary)", margin: 0 }}>
-          사용할 분석 도구를 선택하세요
+          사용할 도구를 선택하세요
         </p>
       </div>
 
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-        gap: 16, width: "100%", maxWidth: 780,
+        display: "flex", flexDirection: "column",
+        gap: 14, width: "100%", maxWidth: 540,
       }}>
         {APPS.map(app => {
           const isHovered = hovered === app.id;
           return (
             <div
               key={app.id}
-              onClick={() => app.ready && onSelect(app.id)}
+              onClick={() => {
+                if (!app.ready) return;
+                if (app.href) { window.open(app.href, "_blank", "noopener,noreferrer"); return; }
+                onSelect(app.id);
+              }}
               onMouseEnter={() => setHovered(app.id)}
               onMouseLeave={() => setHovered(null)}
               style={{
@@ -86,7 +100,7 @@ function HomeScreen({ onSelect }) {
                 border: isHovered && app.ready
                   ? "2px solid " + app.accentColor
                   : "1.5px solid var(--color-border-secondary)",
-                padding: "1.75rem 1.5rem",
+                padding: "1.1rem 1.4rem",
                 cursor: app.ready ? "pointer" : "default",
                 transition: "all 0.18s",
                 boxShadow: isHovered && app.ready
@@ -94,11 +108,12 @@ function HomeScreen({ onSelect }) {
                   : "0 1px 4px rgba(0,0,0,0.06)",
                 opacity: app.ready ? 1 : 0.65,
                 position: "relative",
+                display: "flex", alignItems: "center", gap: "1.1rem",
               }}
             >
               {!app.ready && (
                 <div style={{
-                  position: "absolute", top: 12, right: 12,
+                  position: "absolute", top: 10, right: 12,
                   fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 20,
                   background: "var(--color-background-warning)",
                   color: "var(--color-text-warning)",
@@ -106,37 +121,40 @@ function HomeScreen({ onSelect }) {
                 }}>준비중</div>
               )}
               <div style={{
-                width: 52, height: 52,
+                width: 48, height: 48, flexShrink: 0,
                 background: isHovered && app.ready ? app.accentColor : app.accentBg,
                 borderRadius: "var(--border-radius-md)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                marginBottom: "1.1rem", fontSize: 24, transition: "all 0.18s",
+                fontSize: 22, transition: "all 0.18s",
               }}>{app.icon}</div>
-              <div style={{
-                fontSize: 16, fontWeight: 600, marginBottom: 6, transition: "color 0.18s",
-                color: isHovered && app.ready ? app.accentColor : "var(--color-text-primary)",
-              }}>{app.label}</div>
-              <div style={{
-                fontSize: 13, color: "var(--color-text-secondary)",
-                lineHeight: 1.65, marginBottom: "1.1rem",
-              }}>{app.desc}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {app.tags.map(t => (
-                  <span key={t} style={{
-                    fontSize: 11, fontWeight: 500, padding: "3px 9px", borderRadius: 20,
-                    background: app.accentBg, color: app.accentColor,
-                    border: "1px solid " + app.accentColor + "33",
-                  }}>{t}</span>
-                ))}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 15, fontWeight: 600, marginBottom: 3, transition: "color 0.18s",
+                  color: isHovered && app.ready ? app.accentColor : "var(--color-text-primary)",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  {app.label}
+                  {app.href && <span style={{ fontSize: 10, color: app.accentColor, fontWeight: 400 }}>↗ 외부</span>}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.55, marginBottom: 6 }}>
+                  {app.desc}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {app.tags.map(t => (
+                    <span key={t} style={{
+                      fontSize: 10, fontWeight: 500, padding: "2px 7px", borderRadius: 20,
+                      background: app.accentBg, color: app.accentColor,
+                      border: "1px solid " + app.accentColor + "33",
+                    }}>{t}</span>
+                  ))}
+                </div>
               </div>
               {app.ready && (
                 <div style={{
-                  marginTop: "1.1rem", fontSize: 12, fontWeight: 600,
-                  color: isHovered ? app.accentColor : "var(--color-text-tertiary)",
-                  transition: "color 0.18s",
-                }}>
-                  {isHovered ? "→ 시작하기" : "클릭하여 시작"}
-                </div>
+                  fontSize: 18, color: isHovered ? app.accentColor : "var(--color-text-tertiary)",
+                  transition: "all 0.18s", flexShrink: 0,
+                  transform: isHovered ? "translateX(3px)" : "none",
+                }}>→</div>
               )}
             </div>
           );
