@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { C } from "../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
+import { makeDataset } from "../utils/dataUtils";
+import { ChartCard, HistChart, BarFreq, GroupedBar, CorrHeatmap, getNumCols, getCatCols } from "./Charts";
 
 const MODELS = [
   { id: "deepseek/deepseek-v4-flash",          label: "DeepSeek V4 Flash" },
@@ -22,8 +24,8 @@ async function callOpenRouter(apiKey, model, systemPrompt, userMsg) {
         { role: "system", content: systemPrompt },
         { role: "user",   content: userMsg },
       ],
-      temperature: 0.1,
-      max_tokens: 1024,
+      temperature: 0.3,
+      max_tokens: 1500,
     }),
   });
   if (!res.ok) {
@@ -51,6 +53,76 @@ function inpStyle(extra = {}) {
   };
 }
 
+// ── Auto-chart panel for SQL result dataset ───────────────────────────────────
+function SqlResultCharts({ ds }) {
+  const numCols = getNumCols(ds);
+  const catCols = getCatCols(ds);
+  const charts  = [];
+
+  if (numCols.length >= 2) {
+    charts.push(
+      <ChartCard key="corr" title="상관관계 히트맵" subtitle="숫자형 컬럼 간 상관계수">
+        <CorrHeatmap ds={ds} />
+      </ChartCard>
+    );
+  }
+
+  if (catCols.length > 0 && numCols.length > 0) {
+    charts.push(
+      <ChartCard key="grouped" title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}>
+        <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
+      </ChartCard>
+    );
+  } else if (catCols.length > 0) {
+    charts.push(
+      <ChartCard key="freq" title={`${catCols[0].name} 빈도`}>
+        <BarFreq ds={ds} col={catCols[0].name} />
+      </ChartCard>
+    );
+  }
+
+  numCols.slice(0, 2).forEach(nc => {
+    charts.push(
+      <ChartCard key={`hist-${nc.name}`} title={`${nc.name} 분포`}>
+        <HistChart ds={ds} col={nc.name} />
+      </ChartCard>
+    );
+  });
+
+  if (!charts.length) return null;
+
+  return (
+    <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:14 }}>
+      <div style={{ padding:"10px 16px", background:"linear-gradient(90deg,#E8F1E7 0%,#F2F7F1 100%)",
+        borderBottom:`1px solid ${C.bd}` }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:400,
+          color:"var(--color-primary-700)", letterSpacing:"-0.01em" }}>
+          📊 결과 시각화
+        </div>
+      </div>
+      <div style={{ padding:"14px 14px 4px" }}>{charts}</div>
+    </div>
+  );
+}
+
+// ── Markdown-ish block renderer ───────────────────────────────────────────────
+function MdBlock({ text }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  return (
+    <div style={{ fontSize:13, color:C.tx, lineHeight:1.75, fontFamily:"var(--font-sans)" }}>
+      {lines.map((ln, i) => {
+        if (/^###/.test(ln)) return <div key={i} style={{ fontWeight:700, fontSize:14, color:"var(--color-primary-700)", marginTop:10, marginBottom:2 }}>{ln.replace(/^###\s*/,"")}</div>;
+        if (/^##/.test(ln))  return <div key={i} style={{ fontWeight:700, fontSize:15, color:"var(--color-primary-700)", marginTop:12, marginBottom:4 }}>{ln.replace(/^##\s*/,"")}</div>;
+        if (/^#/.test(ln))   return <div key={i} style={{ fontWeight:700, fontSize:16, color:"var(--color-primary-800)", marginTop:14, marginBottom:6 }}>{ln.replace(/^#\s*/,"")}</div>;
+        if (/^\s*[-*]\s/.test(ln)) return <div key={i} style={{ paddingLeft:16, marginBottom:2 }}>• {ln.replace(/^\s*[-*]\s*/,"")}</div>;
+        if (!ln.trim()) return <div key={i} style={{ height:6 }} />;
+        return <div key={i} style={{ marginBottom:2 }}>{ln}</div>;
+      })}
+    </div>
+  );
+}
+
 export function DBTab({ allDs }) {
   const [sqlReady, setSqlReady]       = useState(false);
   const [sqlError, setSqlError]       = useState("");
@@ -68,10 +140,15 @@ export function DBTab({ allDs }) {
   const [query,    setQuery]          = useState("");
   const [editSQL,  setEditSQL]        = useState("");
   const [results,  setResults]        = useState(null);
+  const [resultDs, setResultDs]       = useState(null);
   const [history,  setHistory]        = useState([]);
   const [loading,  setLoading]        = useState(false);
   const [error,    setError]          = useState("");
   const [activeTab,setActiveTab]      = useState("import");
+
+  const [aiLoading, setAiLoading]     = useState(false);
+  const [aiResult,  setAiResult]      = useState("");
+  const [aiError,   setAiError]       = useState("");
 
   // ── Init sql.js ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -177,23 +254,74 @@ ${schema}`;
     const db  = dbRef.current;
     const sql = editSQL.trim();
     if (!db || !sql) return;
-    setError("");
+    setError(""); setAiResult(""); setAiError("");
     try {
       const res = db.exec(sql);
       if (!res.length) {
-        setResults({ columns: ["결과"], rows: [{ 결과: "쿼리 실행 완료 (반환 행 없음)" }] });
+        const r = { columns: ["결과"], rows: [{ 결과: "쿼리 실행 완료 (반환 행 없음)" }] };
+        setResults(r);
+        setResultDs(makeDataset(crypto.randomUUID(), "sql_result", r.rows));
       } else {
         const { columns, values } = res[0];
-        setResults({
-          columns,
-          rows: values.map(row => Object.fromEntries(columns.map((c, i) => [c, row[i]]))),
-        });
+        const rows = values.map(row => Object.fromEntries(columns.map((c, i) => [c, row[i]])));
+        setResults({ columns, rows });
+        setResultDs(makeDataset(crypto.randomUUID(), "sql_result", rows));
       }
       setHistory(p => [{ query, sql, ts: new Date().toLocaleTimeString() }, ...p].slice(0, 10));
       refreshTables();
     } catch (e) {
       setError(`실행 오류: ${e.message}`);
       setResults(null);
+      setResultDs(null);
+    }
+  };
+
+  // ── AI interpretation ────────────────────────────────────────────────────────
+  const interpretResult = async () => {
+    if (!apiKey.trim()) return setAiError("OpenRouter API 키를 입력해 주세요.");
+    if (!resultDs)      return;
+    setAiLoading(true); setAiResult(""); setAiError("");
+    try {
+      const schema = buildSchemaCtx();
+      const colInfo = resultDs.colMeta.map(c => {
+        const s = c.stats;
+        const detail = c.type === "number"
+          ? `min=${s.min}, max=${s.max}, mean=${s.mean}, std=${s.std}`
+          : c.type === "category"
+          ? `top: ${(s.topValues||[]).map(([v,n]) => `${v}(${n})`).join(", ")}`
+          : `unique=${s.unique}`;
+        return `- ${c.name} [${c.type}]: ${detail}, 결측=${s.nullCount}`;
+      }).join("\n");
+
+      const sampleRows = resultDs.rows.slice(0, 20)
+        .map(r => resultDs.columns.map(c => String(r[c] ?? "")).join(" | "))
+        .join("\n");
+
+      const sys = `당신은 데이터 분석 전문가입니다. SQL 쿼리 결과 데이터를 분석하고 한국어로 핵심 인사이트를 제공하세요.
+분석 내용: 주요 패턴, 이상값, 트렌드, 비즈니스 관점의 해석을 포함하세요.
+원본 DB 스키마 컨텍스트:
+${schema}`;
+
+      const userMsg = `## SQL 쿼리
+\`\`\`sql
+${editSQL}
+\`\`\`
+
+## 결과 데이터 정보 (${resultDs.rowCount}행 × ${resultDs.columns.length}열)
+${colInfo}
+
+## 샘플 데이터 (최대 20행)
+${resultDs.columns.join(" | ")}
+${sampleRows}
+
+위 SQL 결과를 분석하고 핵심 인사이트를 제공해 주세요.`;
+
+      const answer = await callOpenRouter(apiKey.trim(), model, sys, userMsg);
+      setAiResult(answer);
+    } catch (e) {
+      setAiError(`AI 분석 실패: ${e.message}`);
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -416,18 +544,48 @@ ${schema}`;
             </div>
           )}
 
-          {/* Results */}
+          {/* Results table */}
           {results && (
             <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)",
               overflow:"hidden", marginBottom:14 }}>
               <div style={{ padding:"10px 16px", background:"#E3F1E8", borderBottom:`1px solid ${C.bd}`,
-                display:"flex", alignItems:"center", gap:8 }}>
+                display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
                 <span style={{ fontSize:12, fontWeight:600, color:"var(--color-text-success)" }}>
                   ✅ 결과 — {results.rows.length.toLocaleString()}행 × {results.columns.length}열
                 </span>
+                {apiKey && (
+                  <Btn small variant="primary" onClick={interpretResult} disabled={aiLoading}>
+                    {aiLoading ? "AI 분석 중…" : "🤖 AI 해석"}
+                  </Btn>
+                )}
               </div>
               <div style={{ padding:12 }}>
                 <DataTable rows={results.rows} columns={results.columns} maxH={400} />
+              </div>
+            </div>
+          )}
+
+          {/* Auto-charts */}
+          {resultDs && resultDs.rowCount > 0 && <SqlResultCharts ds={resultDs} />}
+
+          {/* AI interpretation */}
+          {(aiResult || aiError || aiLoading) && (
+            <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)",
+              overflow:"hidden", marginBottom:14 }}>
+              <div style={{ padding:"10px 16px", background:"linear-gradient(90deg,#EAE8F5 0%,#F4F3FA 100%)",
+                borderBottom:`1px solid ${C.bd}` }}>
+                <span style={{ fontSize:13, fontWeight:600, color:"#4B3FA0" }}>🤖 AI 데이터 해석</span>
+              </div>
+              <div style={{ padding:16 }}>
+                {aiLoading && (
+                  <div style={{ fontSize:13, color:C.txS, textAlign:"center", padding:"24px 0" }}>
+                    분석 중…
+                  </div>
+                )}
+                {aiError && (
+                  <div style={{ fontSize:12, color:C.dangerTx }}>⚠️ {aiError}</div>
+                )}
+                {aiResult && <MdBlock text={aiResult} />}
               </div>
             </div>
           )}
