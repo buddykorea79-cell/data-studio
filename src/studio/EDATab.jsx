@@ -1,11 +1,39 @@
 import { useState } from "react";
 import { C, TYPE_CLR } from "../constants";
 import { Btn, DsSelector, MdBlock } from "./UI";
-import { callGemini } from "../utils/mlUtils";
 import {
   getNumCols, getCatCols, ChartCard,
-  HistChart, BarFreq, PieFreq, CorrHeatmap, MissingChart, GroupedBar,
+  HistChart, BarFreq, CorrHeatmap, MissingChart, GroupedBar,
 } from "./Charts";
+
+const MODELS = [
+  { id: "deepseek/deepseek-v4-flash",   label: "DeepSeek V4 Flash" },
+  { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
+];
+
+async function callOpenRouter(apiKey, model, prompt) {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": window.location.origin,
+      "X-Title": "Data Studio",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 2000,
+    }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
 
 // ── EDA helpers ───────────────────────────────────────────────────────────────
 function buildSummary(ds, sampleN) {
@@ -61,7 +89,7 @@ function buildPrompt(ds, type, customQ, sendMode, sampleN, summaryDs) {
   return prompts[type] || prompts.overview;
 }
 
-// ── 자동 차트 섹션 (API 키 없이 항상 표시) ────────────────────────────────────
+// ── 자동 차트 섹션 ─────────────────────────────────────────────────────────────
 function AutoChartSection({ ds }) {
   const [open, setOpen] = useState(true);
   const numCols = getNumCols(ds);
@@ -70,17 +98,12 @@ function AutoChartSection({ ds }) {
 
   return (
     <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
-      <button
-        type="button"
-        onClick={() => setOpen(p => !p)}
+      <button type="button" onClick={() => setOpen(p => !p)}
         style={{ width: "100%", padding: "11px 14px", background: C.bgS,
           borderBottom: open ? `0.5px solid ${C.bd}` : "none",
           border: "none", cursor: "pointer", display: "flex", alignItems: "center",
-          justifyContent: "space-between", textAlign: "left" }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>
-          📊 데이터 자동 시각화 — {ds.name}
-        </span>
+          justifyContent: "space-between", textAlign: "left" }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>📊 데이터 자동 시각화 — {ds.name}</span>
         <span style={{ fontSize: 11, color: C.txS }}>{open ? "▲ 접기" : "▼ 펼치기"}</span>
       </button>
 
@@ -101,21 +124,16 @@ function AutoChartSection({ ds }) {
             ))}
           </div>
 
-          {/* 숫자형 분포 */}
           {numCols.length > 0 && (
-            <ChartCard
-              title="숫자형 컬럼 분포 (히스토그램)"
+            <ChartCard title="숫자형 컬럼 분포 (히스토그램)"
               subtitle={numCols.slice(0, 4).map(c => c.name).join(" · ")}
-              desc="막대가 한쪽으로 치우치면 왜도가 있는 데이터입니다. 양 끝에 극단값이 있으면 이상치(Outlier)를 의심해 보세요."
-            >
+              desc="막대가 한쪽으로 치우치면 왜도가 있는 데이터입니다. 양 끝에 극단값이 있으면 이상치(Outlier)를 의심해 보세요.">
               <div style={{ display: "grid", gridTemplateColumns: numCols.length > 1 ? "1fr 1fr" : "1fr", gap: 16 }}>
                 {numCols.slice(0, 4).map(col => (
                   <div key={col.name}>
                     <div style={{ fontSize: 11, color: C.txS, marginBottom: 3, fontFamily: "var(--font-mono)" }}>
                       {col.name}
-                      <span style={{ color: C.txT, marginLeft: 6 }}>
-                        평균 {col.stats.mean} · 표준편차 {col.stats.std}
-                      </span>
+                      <span style={{ color: C.txT, marginLeft: 6 }}>평균 {col.stats.mean} · 표준편차 {col.stats.std}</span>
                     </div>
                     <HistChart ds={ds} col={col.name} />
                   </div>
@@ -124,13 +142,10 @@ function AutoChartSection({ ds }) {
             </ChartCard>
           )}
 
-          {/* 범주형 분포 */}
           {catCols.length > 0 && (
-            <ChartCard
-              title="범주형 컬럼 빈도"
+            <ChartCard title="범주형 컬럼 빈도"
               subtitle={catCols.slice(0, 3).map(c => c.name).join(" · ")}
-              desc="특정 범주가 압도적으로 많으면 클래스 불균형(Imbalanced) 데이터입니다. ML 분류 시 주의가 필요합니다."
-            >
+              desc="특정 범주가 압도적으로 많으면 클래스 불균형(Imbalanced) 데이터입니다. ML 분류 시 주의가 필요합니다.">
               <div style={{ display: "grid", gridTemplateColumns: catCols.length > 1 ? "1fr 1fr" : "1fr", gap: 18 }}>
                 {catCols.slice(0, 4).map(col => (
                   <div key={col.name}>
@@ -145,35 +160,26 @@ function AutoChartSection({ ds }) {
             </ChartCard>
           )}
 
-          {/* 상관관계 히트맵 */}
           {numCols.length >= 2 && (
-            <ChartCard
-              title="상관관계 히트맵"
+            <ChartCard title="상관관계 히트맵"
               subtitle="숫자형 컬럼 간 피어슨 상관계수 (최대 10개 컬럼)"
-              desc="파란색 진할수록 양의 상관(같이 증가), 빨간색 진할수록 음의 상관(반대 방향). |0.7| 이상이면 강한 관계입니다. 피처 선택 시 활용하세요."
-            >
+              desc="파란색 진할수록 양의 상관(같이 증가), 빨간색 진할수록 음의 상관(반대 방향). |0.7| 이상이면 강한 관계입니다.">
               <CorrHeatmap ds={ds} />
             </ChartCard>
           )}
 
-          {/* 결측값 */}
           {totalMissing > 0 && (
-            <ChartCard
-              title="결측값 현황"
+            <ChartCard title="결측값 현황"
               subtitle="컬럼별 결측 비율 (빨강 30% 이상, 주황 10% 이상)"
-              desc="결측 비율이 높은 컬럼은 분석 신뢰도를 낮춥니다. 전처리 탭에서 평균/최빈값 채우기 또는 컬럼 제거를 검토하세요."
-            >
+              desc="결측 비율이 높은 컬럼은 분석 신뢰도를 낮춥니다. 전처리 탭에서 평균/최빈값 채우기 또는 컬럼 제거를 검토하세요.">
               <MissingChart ds={ds} />
             </ChartCard>
           )}
 
-          {/* 범주별 수치 평균 */}
           {catCols.length > 0 && numCols.length > 0 && (
-            <ChartCard
-              title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}
+            <ChartCard title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}
               subtitle="범주 간 수치 차이 비교"
-              desc="범주 간 평균 차이가 클수록 해당 범주 컬럼이 예측 모델에서 중요한 피처일 가능성이 높습니다."
-            >
+              desc="범주 간 평균 차이가 클수록 해당 범주 컬럼이 예측 모델에서 중요한 피처일 가능성이 높습니다.">
               <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
             </ChartCard>
           )}
@@ -183,37 +189,29 @@ function AutoChartSection({ ds }) {
   );
 }
 
-// ── Gemini 결과 카드에 연결된 관련 차트 패널 ──────────────────────────────────
+// ── AI 결과 카드에 포함되는 관련 차트 (기본 펼침) ────────────────────────────────
 function ResultChartsPanel({ ds, aType }) {
-  const [open, setOpen] = useState(false);
   if (!ds) return null;
-
   const numCols = getNumCols(ds);
   const catCols = getCatCols(ds);
   const totalMissing = ds.colMeta.reduce((s, c) => s + c.stats.nullCount, 0);
 
-  let chartContent = null;
-  let chartLabel = "";
-
   if (aType === "overview") {
-    chartLabel = "개요 관련 차트: 분포 + 상관관계";
-    chartContent = (
-      <div>
+    return (
+      <div style={{ padding: "14px 18px", borderTop: `0.5px solid ${C.bd}`, background: C.bgS }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.txS, marginBottom: 10,
+          textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          📊 분석 관련 차트
+        </div>
         {numCols.length >= 2 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>상관관계 히트맵</div>
-            <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-              색이 진할수록 두 컬럼의 선형 관계가 강합니다 (파랑=양의 상관, 빨강=음의 상관)
-            </div>
+          <ChartCard title="상관관계 히트맵"
+            desc="색이 진할수록 두 컬럼의 선형 관계가 강합니다 (파랑=양의 상관, 빨강=음의 상관)">
             <CorrHeatmap ds={ds} />
-          </div>
+          </ChartCard>
         )}
         {numCols.length > 0 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>숫자형 분포</div>
-            <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-              분포 모양이 종 모양(정규분포)에 가까울수록 표준 통계 기법을 적용하기 쉽습니다
-            </div>
+          <ChartCard title="숫자형 분포"
+            desc="분포 모양이 종 모양에 가까울수록 표준 통계 기법 적용이 쉽습니다">
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {numCols.slice(0, 4).map(col => (
                 <div key={col.name}>
@@ -222,33 +220,30 @@ function ResultChartsPanel({ ds, aType }) {
                 </div>
               ))}
             </div>
-          </div>
+          </ChartCard>
         )}
       </div>
     );
   }
 
   if (aType === "quality") {
-    chartLabel = "품질 관련 차트: 결측값 + 이상치 확인";
-    chartContent = (
-      <div>
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>결측값 현황</div>
-          <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-            빨간색 컬럼은 결측값 30% 이상 — 삭제 또는 보간을 우선 검토하세요
-          </div>
+    return (
+      <div style={{ padding: "14px 18px", borderTop: `0.5px solid ${C.bd}`, background: C.bgS }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.txS, marginBottom: 10,
+          textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          📊 품질 관련 차트
+        </div>
+        <ChartCard title="결측값 현황"
+          desc="빨간색 컬럼은 결측값 30% 이상 — 삭제 또는 보간을 우선 검토하세요">
           {totalMissing > 0 ? <MissingChart ds={ds} /> : (
             <div style={{ padding: "12px", background: "#E1F5EE", borderRadius: 8, fontSize: 12, color: "#0F6E56" }}>
               ✓ 결측값 없음 — 데이터 품질 양호
             </div>
           )}
-        </div>
+        </ChartCard>
         {numCols.length > 0 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>숫자형 분포 (이상치 확인)</div>
-            <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-              분포 양쪽 끝에 고립된 막대가 있으면 이상치(Outlier)일 수 있습니다
-            </div>
+          <ChartCard title="숫자형 분포 (이상치 확인)"
+            desc="분포 양쪽 끝에 고립된 막대가 있으면 이상치(Outlier)일 수 있습니다">
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {numCols.slice(0, 4).map(col => (
                 <div key={col.name}>
@@ -259,41 +254,33 @@ function ResultChartsPanel({ ds, aType }) {
                 </div>
               ))}
             </div>
-          </div>
+          </ChartCard>
         )}
       </div>
     );
   }
 
   if (aType === "insight") {
-    chartLabel = "인사이트 관련 차트: 주요 범주 + 비교";
-    chartContent = (
-      <div>
+    return (
+      <div style={{ padding: "14px 18px", borderTop: `0.5px solid ${C.bd}`, background: C.bgS }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.txS, marginBottom: 10,
+          textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          📊 인사이트 관련 차트
+        </div>
         {catCols.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>
-              {catCols[0].name} 분포
-            </div>
-            <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-              가장 빈도가 높은 범주가 핵심 세그먼트입니다
-            </div>
+          <ChartCard title={`${catCols[0].name} 분포`}
+            desc="가장 빈도가 높은 범주가 핵심 세그먼트입니다">
             <BarFreq ds={ds} col={catCols[0].name} topN={10} />
-          </div>
+          </ChartCard>
         )}
         {catCols.length > 0 && numCols.length > 0 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>
-              {catCols[0].name} 별 {numCols[0].name} 평균
-            </div>
-            <div style={{ fontSize: 11, color: C.txT, marginBottom: 8 }}>
-              범주 간 차이가 클수록 해당 컬럼이 중요한 차별 인자입니다
-            </div>
+          <ChartCard title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}
+            desc="범주 간 차이가 클수록 해당 컬럼이 중요한 차별 인자입니다">
             <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
-          </div>
+          </ChartCard>
         )}
         {catCols.length === 0 && numCols.length > 0 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: C.txS, marginBottom: 4 }}>핵심 컬럼 분포</div>
+          <ChartCard title="핵심 컬럼 분포">
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {numCols.slice(0, 2).map(col => (
                 <div key={col.name}>
@@ -302,35 +289,20 @@ function ResultChartsPanel({ ds, aType }) {
                 </div>
               ))}
             </div>
-          </div>
+          </ChartCard>
         )}
       </div>
     );
   }
 
-  if (!chartContent) return null;
-
-  return (
-    <div style={{ borderTop: `0.5px solid ${C.bd}` }}>
-      <button
-        type="button"
-        onClick={() => setOpen(p => !p)}
-        style={{ width: "100%", padding: "10px 18px", background: open ? C.bgS : "transparent",
-          border: "none", cursor: "pointer", display: "flex", alignItems: "center",
-          justifyContent: "space-between", borderBottom: open ? `0.5px solid ${C.bd}` : "none" }}
-      >
-        <span style={{ fontSize: 12, color: C.infoTx, fontWeight: 500 }}>📊 {chartLabel}</span>
-        <span style={{ fontSize: 11, color: C.txS }}>{open ? "▲ 접기" : "▼ 차트 보기"}</span>
-      </button>
-      {open && <div style={{ padding: "14px 18px" }}>{chartContent}</div>}
-    </div>
-  );
+  return null;
 }
 
 // ── EDATab ─────────────────────────────────────────────────────────────────────
 export function EDATab({ allDs, summaryResults }) {
-  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("gemini_key") || "");
+  const [apiKey, setApiKey] = useState(() => sessionStorage.getItem("openrouter_key") || "");
   const [showKey, setShowKey] = useState(false);
+  const [model, setModel] = useState(MODELS[0].id);
   const [selId, setSelId] = useState(() => allDs[0]?.id ?? "");
   const [aType, setAType] = useState("overview");
   const [customQ, setCustomQ] = useState("");
@@ -342,7 +314,7 @@ export function EDATab({ allDs, summaryResults }) {
   const [error, setError] = useState("");
 
   const ds = allDs.find(d => d.id === selId);
-  const saveKey = k => { setApiKey(k); sessionStorage.setItem("gemini_key", k); };
+  const saveKey = k => { setApiKey(k); sessionStorage.setItem("openrouter_key", k); };
 
   const ATYPES = [
     { id: "overview", label: "전체 EDA",         icon: "📊" },
@@ -366,7 +338,7 @@ export function EDATab({ allDs, summaryResults }) {
     setError(""); setLoading(true);
     try {
       const prompt = buildPrompt(ds, aType, customQ, sendMode, sampleN, sumDs);
-      const result = await callGemini(apiKey.trim(), prompt);
+      const result = await callOpenRouter(apiKey.trim(), model, prompt);
       const tl = ATYPES.find(t => t.id === aType)?.label || aType;
       setResults(p => [{
         id: crypto.randomUUID(),
@@ -393,44 +365,56 @@ export function EDATab({ allDs, summaryResults }) {
 
   return (
     <div>
-      {/* 자동 시각화 섹션 (API 키 불필요) */}
+      {/* 자동 시각화 섹션 */}
       {ds && <AutoChartSection ds={ds} />}
 
       {/* API 키 */}
       <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ padding: "11px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>🔑 Gemini API 키</span>
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer"
-            style={{ fontSize: 11, color: C.infoTx, textDecoration: "none", padding: "2px 8px", borderRadius: 4, background: C.info }}>
-            키 발급 →
+        <div style={{ padding: "11px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>🔑 OpenRouter API 키</span>
+          <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer"
+            style={{ fontSize: 11, color: C.infoTx, textDecoration: "none", padding: "2px 8px",
+              borderRadius: 4, background: C.info, border: `1px solid ${C.infoTx}44` }}>
+            무료 키 발급 →
           </a>
         </div>
         <div style={{ padding: "12px 14px" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-            <input
-              type={showKey ? "text" : "password"}
-              placeholder="Google AI Studio API 키 (AIza...)"
+            <input type={showKey ? "text" : "password"} placeholder="sk-or-v1-..."
               value={apiKey} onChange={e => saveKey(e.target.value)}
               style={{ flex: 1, fontSize: 13, padding: "7px 10px", borderRadius: "var(--border-radius-md)",
-                border: `0.5px solid ${apiKey ? "#1D9E75" : C.bdS}`, background: C.bg, color: C.tx, fontFamily: "var(--font-mono)" }}
-            />
-            <button type="button" onClick={() => setShowKey(p => !p)} style={{ fontSize: 11, padding: "3px 8px", cursor: "pointer",
-              borderRadius: "var(--border-radius-md)", background: "transparent", border: `0.5px solid ${C.bdS}`, color: C.txS }}>
+                border: `0.5px solid ${apiKey ? C.successTx+"88" : C.bdS}`,
+                background: C.bg, color: C.tx, fontFamily: "var(--font-mono)" }} />
+            <button type="button" onClick={() => setShowKey(p => !p)}
+              style={{ fontSize: 11, padding: "3px 8px", cursor: "pointer",
+                borderRadius: "var(--border-radius-md)", background: "transparent",
+                border: `0.5px solid ${C.bdS}`, color: C.txS }}>
               {showKey ? "숨기기" : "보기"}
             </button>
-            {apiKey && <span style={{ fontSize: 11, color: "#1D9E75", whiteSpace: "nowrap" }}>✓ 입력됨</span>}
+            {apiKey && <span style={{ fontSize: 11, color: C.successTx, whiteSpace: "nowrap" }}>✓ 입력됨</span>}
           </div>
-          <div style={{ fontSize: 11, color: C.txS }}>키는 브라우저 세션에만 저장됩니다.</div>
+          <div style={{ fontSize: 11, color: C.txS }}>DB 분석 탭과 동일한 키 · 브라우저 세션에만 저장됩니다.</div>
         </div>
       </div>
 
       {/* 분석 설정 */}
       <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
         <div style={{ padding: "11px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}` }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>✨ Gemini AI 분석 설정</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>✨ AI EDA 분석 설정</span>
         </div>
         <div style={{ padding: 14 }}>
           <DsSelector datasets={allDs} value={selId} onChange={setSelId} label="분석 파일" />
+
+          {/* 모델 선택 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 12, color: C.txS, whiteSpace: "nowrap" }}>AI 모델</span>
+            <select value={model} onChange={e => setModel(e.target.value)}
+              style={{ flex: 1, fontSize: 13, padding: "6px 8px", borderRadius: "var(--border-radius-md)",
+                border: `0.5px solid ${C.bdS}`, background: C.bg, color: C.tx }}>
+              {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
 
           {ds && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
@@ -512,18 +496,19 @@ export function EDATab({ allDs, summaryResults }) {
           {ds && (
             <div style={{ fontSize: 11, color: C.txS, background: C.bgS, padding: "8px 10px",
               borderRadius: "var(--border-radius-md)", marginBottom: 12 }}>
-              📤 전송: {sendMode === "stats" ? "통계만" : sendMode === "summary" ? "요약 테이블" : `샘플 ${Math.min(sampleN, ds.rowCount)}행`} · 모델: gemini-2.0-flash
+              📤 전송: {sendMode === "stats" ? "통계만" : sendMode === "summary" ? "요약 테이블" : `샘플 ${Math.min(sampleN, ds.rowCount)}행`}
+              {" · "}모델: {MODELS.find(m => m.id === model)?.label}
             </div>
           )}
 
           {error && (
-            <div style={{ fontSize: 12, color: "#A32D2D", background: "#FCEBEB",
+            <div style={{ fontSize: 12, color: C.dangerTx, background: C.danger,
               padding: "8px 10px", borderRadius: "var(--border-radius-md)", marginBottom: 10 }}>
               {error}
             </div>
           )}
           <Btn variant="primary" onClick={handle} disabled={loading || !apiKey || !ds}>
-            {loading ? "Gemini 분석 중..." : "✨ Gemini EDA 분석 시작"}
+            {loading ? "AI 분석 중..." : "✨ AI EDA 분석 시작"}
           </Btn>
         </div>
       </div>
@@ -546,7 +531,7 @@ export function EDATab({ allDs, summaryResults }) {
             <div style={{ padding: "11px 14px", background: "#E6F1FB", borderBottom: `0.5px solid ${C.bd}`,
               display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#185FA5", color: "#fff", fontWeight: 500 }}>Gemini</span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#185FA5", color: "#fff", fontWeight: 500 }}>AI</span>
                 <span style={{ fontSize: 13, fontWeight: 500, color: "#0C447C" }}>{r.type}</span>
                 <span style={{ fontSize: 12, color: "#185FA5" }}>— {r.dsName}</span>
               </div>
@@ -564,14 +549,22 @@ export function EDATab({ allDs, summaryResults }) {
               <div style={{ padding: "8px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`,
                 fontSize: 12, color: C.txS }}>Q: {r.question}</div>
             )}
-            {/* AI 텍스트 결과 */}
-            <div style={{ padding: "14px 18px", maxHeight: 560, overflowY: "auto" }}>
-              <MdBlock text={r.result} />
+
+            {/* 텍스트 + 차트를 나란히 (wide) 또는 세로 (narrow) */}
+            <div style={{ display: "flex", flexWrap: "wrap" }}>
+              {/* AI 텍스트 결과 */}
+              <div style={{ flex: "1 1 340px", padding: "14px 18px", maxHeight: 600,
+                overflowY: "auto", borderRight: `0.5px solid ${C.bd}` }}>
+                <MdBlock text={r.result} />
+              </div>
+
+              {/* 관련 차트 (항상 표시) */}
+              {chartDs && r.aType !== "custom" && (
+                <div style={{ flex: "1 1 340px", overflowY: "auto", maxHeight: 600 }}>
+                  <ResultChartsPanel ds={chartDs} aType={r.aType} />
+                </div>
+              )}
             </div>
-            {/* 관련 차트 (overview / quality / insight) */}
-            {chartDs && r.aType !== "custom" && (
-              <ResultChartsPanel ds={chartDs} aType={r.aType} />
-            )}
           </div>
         );
       })}
