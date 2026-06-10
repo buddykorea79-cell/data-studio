@@ -53,12 +53,29 @@ export function HistChart({ ds, col }) {
   );
 }
 
-export function BarFreq({ ds, col, topN = 12 }) {
+export function BarFreq({ ds, col, topN = 12, barDir = "h", palette }) {
+  const colors = palette || PALETTE;
   const freq = {};
   ds.rows.forEach(r => { const v = String(r[col] ?? ""); freq[v] = (freq[v] || 0) + 1; });
   const data = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, topN)
     .map(([name, value]) => ({ name, value }));
   if (!data.length) return <NoData />;
+  if (barDir !== "h") {
+    const rotateX = data.length > 7;
+    return (
+      <ResponsiveContainer width="100%" height={Math.max(220, 30)}>
+        <BarChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: rotateX ? 72 : 28 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
+          <XAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: C.txS, ...(rotateX ? { angle: -40, textAnchor: "end" } : {}) }} height={rotateX ? 78 : 32} interval={0} />
+          <YAxis type="number" tick={{ fontSize: 10, fill: C.txS }} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Bar dataKey="value" name="빈도" radius={[3, 3, 0, 0]}>
+            {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, data.length * 26)}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 36, left: 8, bottom: 4 }}>
@@ -67,7 +84,7 @@ export function BarFreq({ ds, col, topN = 12 }) {
         <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={90} />
         <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
         <Bar dataKey="value" name="빈도" radius={[0, 3, 3, 0]}>
-          {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+          {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -191,7 +208,8 @@ export function MissingChart({ ds }) {
   );
 }
 
-export function GroupedBar({ ds, catCol, numCol, topN = 12 }) {
+export function GroupedBar({ ds, catCol, numCol, topN = 12, barDir = "h", palette }) {
+  const colors = palette || PALETTE;
   const agg = {};
   ds.rows.forEach(r => {
     const k = String(r[catCol] ?? "");
@@ -206,6 +224,22 @@ export function GroupedBar({ ds, catCol, numCol, topN = 12 }) {
     .sort((a, b) => b.avg - a.avg)
     .slice(0, topN);
   if (!data.length) return <NoData />;
+  if (barDir !== "h") {
+    const rotateX = data.length > 7;
+    return (
+      <ResponsiveContainer width="100%" height={Math.max(220, 30)}>
+        <BarChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: rotateX ? 72 : 28 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
+          <XAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: C.txS, ...(rotateX ? { angle: -40, textAnchor: "end" } : {}) }} height={rotateX ? 78 : 32} interval={0} />
+          <YAxis type="number" tick={{ fontSize: 10, fill: C.txS }} tickFormatter={v => v.toLocaleString()} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Bar dataKey="avg" name={`${numCol} 평균`} radius={[3, 3, 0, 0]}>
+            {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, data.length * 26)}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
@@ -214,7 +248,7 @@ export function GroupedBar({ ds, catCol, numCol, topN = 12 }) {
         <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={90} />
         <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
         <Bar dataKey="avg" name={`${numCol} 평균`} radius={[0, 3, 3, 0]}>
-          {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+          {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>

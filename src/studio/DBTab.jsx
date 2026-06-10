@@ -53,10 +53,20 @@ function inpStyle(extra = {}) {
   };
 }
 
+const DB_PALETTES = {
+  "기본":   ["#4A7560","#185FA5","#D85A30","#BA7517","#7F77DD","#0F6E56","#378ADD","#EF9F27","#A32D2D","#1D9E75"],
+  "Sage":   ["#2E4D3D","#4A7560","#7FAF97","#A8CCB8","#5B8A72","#9CC4AE","#3A6B53","#C6DDD4"],
+  "블루":   ["#0C447C","#185FA5","#378ADD","#5FA0D4","#88BDE8","#2A7EC8","#63A8D8","#B0D5F4"],
+  "따뜻한": ["#C23B22","#D85A30","#EF9F27","#BA7517","#E87040","#F5C26B","#C45C14","#F7D98C"],
+};
+
 // ── Auto-chart panel for SQL result dataset ───────────────────────────────────
 function SqlResultCharts({ ds }) {
+  const [barDir,      setBarDir]      = useState("v");
+  const [paletteName, setPaletteName] = useState("기본");
   const numCols = getNumCols(ds);
   const catCols = getCatCols(ds);
+  const palette = DB_PALETTES[paletteName] || DB_PALETTES["기본"];
   const charts  = [];
 
   if (numCols.length >= 2) {
@@ -70,13 +80,13 @@ function SqlResultCharts({ ds }) {
   if (catCols.length > 0 && numCols.length > 0) {
     charts.push(
       <ChartCard key="grouped" title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}>
-        <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
+        <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} barDir={barDir} palette={palette} />
       </ChartCard>
     );
   } else if (catCols.length > 0) {
     charts.push(
       <ChartCard key="freq" title={`${catCols[0].name} 빈도`}>
-        <BarFreq ds={ds} col={catCols[0].name} />
+        <BarFreq ds={ds} col={catCols[0].name} barDir={barDir} palette={palette} />
       </ChartCard>
     );
   }
@@ -94,10 +104,37 @@ function SqlResultCharts({ ds }) {
   return (
     <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:14 }}>
       <div style={{ padding:"10px 16px", background:"linear-gradient(90deg,#E8F1E7 0%,#F2F7F1 100%)",
-        borderBottom:`1px solid ${C.bd}` }}>
+        borderBottom:`1px solid ${C.bd}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
         <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:400,
           color:"var(--color-primary-700)", letterSpacing:"-0.01em" }}>
           📊 결과 시각화
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          {/* 막대 방향 */}
+          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+            <span style={{ fontSize:11, color:C.txS }}>방향:</span>
+            {[{v:"v",l:"세로"},{v:"h",l:"가로"}].map(({v,l})=>(
+              <button key={v} type="button" onClick={()=>setBarDir(v)} style={{
+                fontSize:11, padding:"2px 8px", borderRadius:6, cursor:"pointer",
+                background: barDir===v ? C.infoTx : C.bg,
+                color: barDir===v ? "#fff" : C.txS,
+                border:`1px solid ${barDir===v ? C.infoTx : C.bd}`,
+              }}>{l}</button>
+            ))}
+          </div>
+          {/* 색상 팔레트 */}
+          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+            <span style={{ fontSize:11, color:C.txS }}>색상:</span>
+            {Object.entries(DB_PALETTES).map(([name, colors])=>(
+              <button key={name} type="button" onClick={()=>setPaletteName(name)} title={name} style={{
+                display:"flex", gap:2, padding:"3px 5px", borderRadius:6, cursor:"pointer",
+                border:`1.5px solid ${paletteName===name ? C.infoTx : C.bd}`,
+                background: paletteName===name ? C.info : C.bg,
+              }}>
+                {colors.slice(0,4).map((c,i)=><span key={i} style={{ width:8,height:8,borderRadius:2,background:c,display:"inline-block" }} />)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div style={{ padding:"14px 14px 4px" }}>{charts}</div>
