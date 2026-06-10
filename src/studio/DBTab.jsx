@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { C } from "../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
 import { makeDataset } from "../utils/dataUtils";
-import { ChartCard, HistChart, BarFreq, GroupedBar, CorrHeatmap, getNumCols, getCatCols } from "./Charts";
+import { ChartCard, HistChart, CorrHeatmap, getNumCols, XYChart } from "./Charts";
 
 const MODELS = [
   { id: "deepseek/deepseek-v4-flash",          label: "DeepSeek V4 Flash" },
@@ -60,84 +60,142 @@ const DB_PALETTES = {
   "따뜻한": ["#C23B22","#D85A30","#EF9F27","#BA7517","#E87040","#F5C26B","#C45C14","#F7D98C"],
 };
 
-// ── Auto-chart panel for SQL result dataset ───────────────────────────────────
+// ── SQL 결과 시각화 — 데이터 성격 기반 추천 + 커스텀 ──────────────────────────
 function SqlResultCharts({ ds }) {
+  const numCols   = getNumCols(ds);
+  // SQL 결과는 이미 집계된 작은 테이블인 경우가 많음 —
+  // 숫자가 아닌 모든 컬럼(텍스트·범주·날짜)을 X축 후보로 취급
+  const labelCols = ds.colMeta.filter(c => c.type !== "number");
+
+  const recommendBar = labelCols.length > 0 && numCols.length > 0;
+  const [chartType,   setChartType]   = useState(recommendBar ? "bar" : "hist");
+  const [xCol,        setXCol]        = useState(labelCols[0]?.name || ds.columns[0] || "");
+  const [yCol,        setYCol]        = useState(numCols[0]?.name || "");
   const [barDir,      setBarDir]      = useState("v");
   const [paletteName, setPaletteName] = useState("기본");
-  const numCols = getNumCols(ds);
-  const catCols = getCatCols(ds);
   const palette = DB_PALETTES[paletteName] || DB_PALETTES["기본"];
-  const charts  = [];
 
-  if (numCols.length >= 2) {
-    charts.push(
-      <ChartCard key="corr" title="상관관계 히트맵" subtitle="숫자형 컬럼 간 상관계수">
-        <CorrHeatmap ds={ds} />
-      </ChartCard>
-    );
-  }
+  if (!numCols.length) return null;
 
-  if (catCols.length > 0 && numCols.length > 0) {
-    charts.push(
-      <ChartCard key="grouped" title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}>
-        <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} barDir={barDir} palette={palette} />
-      </ChartCard>
-    );
-  } else if (catCols.length > 0) {
-    charts.push(
-      <ChartCard key="freq" title={`${catCols[0].name} 빈도`}>
-        <BarFreq ds={ds} col={catCols[0].name} barDir={barDir} palette={palette} />
-      </ChartCard>
-    );
-  }
+  // X축 기준으로 Y값 정리 — SQL이 이미 집계한 결과면 그대로, 중복 X는 평균
+  const buildData = () => {
+    const groups = {};
+    ds.rows.forEach(r => {
+      const k = String(r[xCol] ?? "");
+      const v = parseFloat(r[yCol]);
+      if (!groups[k]) groups[k] = { sum: 0, cnt: 0 };
+      if (!isNaN(v)) { groups[k].sum += v; groups[k].cnt++; }
+    });
+    return Object.entries(groups)
+      .map(([name, g]) => ({ name, value: g.cnt ? +(g.sum / g.cnt).toFixed(3) : 0 }))
+      .slice(0, 30);
+  };
 
-  numCols.slice(0, 2).forEach(nc => {
-    charts.push(
-      <ChartCard key={`hist-${nc.name}`} title={`${nc.name} 분포`}>
-        <HistChart ds={ds} col={nc.name} />
-      </ChartCard>
-    );
-  });
+  const CHART_TYPES = [
+    { id: "bar",  label: "막대" },
+    { id: "line", label: "선" },
+    { id: "pie",  label: "파이" },
+    { id: "hist", label: "히스토그램" },
+  ];
 
-  if (!charts.length) return null;
+  const selStyle = {
+    fontSize: 12, padding: "4px 8px", borderRadius: 6,
+    border: `1px solid ${C.bd}`, background: C.bg, color: C.tx, maxWidth: 140,
+  };
+
+  const needXY = chartType !== "hist";
+  const canDraw = chartType === "hist" ? !!yCol : (!!xCol && !!yCol);
+  const title = chartType === "hist"
+    ? `${yCol} 분포`
+    : `${xCol} 별 ${yCol}`;
 
   return (
     <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:14 }}>
       <div style={{ padding:"10px 16px", background:"linear-gradient(90deg,#E8F1E7 0%,#F2F7F1 100%)",
-        borderBottom:`1px solid ${C.bd}`, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+        borderBottom:`1px solid ${C.bd}` }}>
         <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:400,
           color:"var(--color-primary-700)", letterSpacing:"-0.01em" }}>
           📊 결과 시각화
+          {recommendBar && <span style={{ fontSize:11, color:C.txS, marginLeft:8 }}>
+            추천: {labelCols[0]?.name}(X축) × {numCols[0]?.name}(Y축) 막대 그래프
+          </span>}
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          {/* 막대 방향 */}
+      </div>
+
+      {/* 커스텀 컨트롤 */}
+      <div style={{ padding:"10px 16px", borderBottom:`1px solid ${C.bd}`, background:C.bgS,
+        display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
+        {/* 차트 종류 */}
+        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+          <span style={{ fontSize:11, color:C.txS }}>차트:</span>
+          {CHART_TYPES.map(t => (
+            <button key={t.id} type="button" onClick={() => setChartType(t.id)} style={{
+              fontSize:11, padding:"3px 9px", borderRadius:6, cursor:"pointer",
+              background: chartType===t.id ? C.infoTx : C.bg,
+              color: chartType===t.id ? "#fff" : C.txS,
+              border:`1px solid ${chartType===t.id ? C.infoTx : C.bd}`,
+            }}>{t.label}</button>
+          ))}
+        </div>
+        {/* X축 */}
+        {needXY && (
+          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+            <span style={{ fontSize:11, color:C.txS }}>X축:</span>
+            <select value={xCol} onChange={e => setXCol(e.target.value)} style={selStyle}>
+              {ds.columns.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        )}
+        {/* Y축 (숫자) */}
+        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+          <span style={{ fontSize:11, color:C.txS }}>{needXY ? "Y축:" : "컬럼:"}</span>
+          <select value={yCol} onChange={e => setYCol(e.target.value)} style={selStyle}>
+            {numCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>
+        {/* 막대 방향 */}
+        {chartType === "bar" && (
           <div style={{ display:"flex", gap:4, alignItems:"center" }}>
             <span style={{ fontSize:11, color:C.txS }}>방향:</span>
-            {[{v:"v",l:"세로"},{v:"h",l:"가로"}].map(({v,l})=>(
-              <button key={v} type="button" onClick={()=>setBarDir(v)} style={{
-                fontSize:11, padding:"2px 8px", borderRadius:6, cursor:"pointer",
+            {[{v:"v",l:"세로"},{v:"h",l:"가로"}].map(({v,l}) => (
+              <button key={v} type="button" onClick={() => setBarDir(v)} style={{
+                fontSize:11, padding:"3px 8px", borderRadius:6, cursor:"pointer",
                 background: barDir===v ? C.infoTx : C.bg,
                 color: barDir===v ? "#fff" : C.txS,
                 border:`1px solid ${barDir===v ? C.infoTx : C.bd}`,
               }}>{l}</button>
             ))}
           </div>
-          {/* 색상 팔레트 */}
-          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-            <span style={{ fontSize:11, color:C.txS }}>색상:</span>
-            {Object.entries(DB_PALETTES).map(([name, colors])=>(
-              <button key={name} type="button" onClick={()=>setPaletteName(name)} title={name} style={{
-                display:"flex", gap:2, padding:"3px 5px", borderRadius:6, cursor:"pointer",
-                border:`1.5px solid ${paletteName===name ? C.infoTx : C.bd}`,
-                background: paletteName===name ? C.info : C.bg,
-              }}>
-                {colors.slice(0,4).map((c,i)=><span key={i} style={{ width:8,height:8,borderRadius:2,background:c,display:"inline-block" }} />)}
-              </button>
-            ))}
-          </div>
+        )}
+        {/* 색상 팔레트 */}
+        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+          <span style={{ fontSize:11, color:C.txS }}>색상:</span>
+          {Object.entries(DB_PALETTES).map(([name, colors]) => (
+            <button key={name} type="button" onClick={() => setPaletteName(name)} title={name} style={{
+              display:"flex", gap:2, padding:"3px 5px", borderRadius:6, cursor:"pointer",
+              border:`1.5px solid ${paletteName===name ? C.infoTx : C.bd}`,
+              background: paletteName===name ? C.info : C.bg,
+            }}>
+              {colors.slice(0,4).map((c,i) => <span key={i} style={{ width:8,height:8,borderRadius:2,background:c,display:"inline-block" }} />)}
+            </button>
+          ))}
         </div>
       </div>
-      <div style={{ padding:"14px 14px 4px" }}>{charts}</div>
+
+      <div style={{ padding:"14px 14px 4px" }}>
+        {canDraw && (
+          <ChartCard title={title} subtitle={needXY ? `X축: ${xCol} / Y축: ${yCol}` : undefined}>
+            {chartType === "hist"
+              ? <HistChart ds={ds} col={yCol} />
+              : <XYChart data={buildData()} type={chartType} barDir={barDir} palette={palette} valueName={yCol} />}
+          </ChartCard>
+        )}
+        {numCols.length >= 2 && (
+          <ChartCard title="상관관계 히트맵" subtitle="숫자형 컬럼 간 상관계수">
+            <CorrHeatmap ds={ds} />
+          </ChartCard>
+        )}
+      </div>
     </div>
   );
 }
@@ -603,7 +661,7 @@ ${sampleRows}
           )}
 
           {/* Auto-charts */}
-          {resultDs && resultDs.rowCount > 0 && <SqlResultCharts ds={resultDs} />}
+          {resultDs && resultDs.rowCount > 0 && <SqlResultCharts key={resultDs.id} ds={resultDs} />}
 
           {/* AI interpretation */}
           {(aiResult || aiError || aiLoading) && (

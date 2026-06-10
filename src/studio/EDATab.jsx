@@ -4,6 +4,7 @@ import { Btn, DsSelector, MdBlock } from "./UI";
 import {
   getNumCols, getCatCols, ChartCard,
   HistChart, BarFreq, CorrHeatmap, MissingChart, GroupedBar,
+  SpecChart, specValid,
 } from "./Charts";
 
 const MODELS = [
@@ -79,7 +80,18 @@ function buildPrompt(ds, type, customQ, sendMode, sampleN, summaryDs) {
       "## 컬럼 통계", colSum.join(sep), "## 샘플", "```csv", csv, "```"].join(sep);
   }
 
-  const base = `\n\n${dataCtx}`;
+  // AI가 분석 결과와 어울리는 차트를 직접 추천하도록 스펙 JSON을 요구
+  const chartInstr = `
+
+## 차트 추천 (필수)
+답변 맨 마지막에 아래 형식의 json 코드블록을 정확히 추가하세요. 분석 내용과 가장 관련 있는 차트 2~3개를 추천하고, 컬럼명은 위 데이터의 실제 컬럼명만 사용하세요.
+\`\`\`json
+{"charts":[{"type":"bar","x":"범주형컬럼명","y":"숫자컬럼명","agg":"mean","title":"차트 제목","reason":"추천 이유 한 줄"}]}
+\`\`\`
+- type: "bar"(범주별 비교) | "line"(추세) | "pie"(구성비) | "hist"(분포, y만 필요) | "scatter"(상관관계, x·y 모두 숫자 컬럼)
+- agg: "mean" | "sum" | "count" — bar/line/pie에서 y 집계 방식 (count면 y 생략 가능)`;
+
+  const base = `\n\n${dataCtx}${chartInstr}`;
   const prompts = {
     overview: `당신은 데이터 분석 전문가입니다. EDA 보고서를 한국어로 작성해 주세요.\n1. 데이터 개요 및 품질\n2. 컬럼별 특성\n3. 패턴/이상값\n4. 컬럼 간 관계\n5. 활용 시 주의사항${base}`,
     quality:  `당신은 데이터 품질 전문가입니다. 품질 평가를 한국어로 해주세요.\n1. 결측값 처리 방안\n2. 이상값 가능성\n3. 타입 불일치\n4. 중복 가능성\n5. 정제 우선순위${base}`,
@@ -89,104 +101,18 @@ function buildPrompt(ds, type, customQ, sendMode, sampleN, summaryDs) {
   return prompts[type] || prompts.overview;
 }
 
-// ── 자동 차트 섹션 ─────────────────────────────────────────────────────────────
-function AutoChartSection({ ds }) {
-  const [open, setOpen] = useState(true);
-  const numCols = getNumCols(ds);
-  const catCols = getCatCols(ds);
-  const totalMissing = ds.colMeta.reduce((s, c) => s + c.stats.nullCount, 0);
-
-  return (
-    <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
-      <button type="button" onClick={() => setOpen(p => !p)}
-        style={{ width: "100%", padding: "11px 14px", background: C.bgS,
-          borderBottom: open ? `0.5px solid ${C.bd}` : "none",
-          border: "none", cursor: "pointer", display: "flex", alignItems: "center",
-          justifyContent: "space-between", textAlign: "left" }}>
-        <span style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>📊 데이터 자동 시각화 — {ds.name}</span>
-        <span style={{ fontSize: 11, color: C.txS }}>{open ? "▲ 접기" : "▼ 펼치기"}</span>
-      </button>
-
-      {open && (
-        <div style={{ padding: 14 }}>
-          {/* 요약 통계 카드 */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 8, marginBottom: 14 }}>
-            {[
-              ["전체 행", ds.rowCount.toLocaleString(), null],
-              ["숫자형 컬럼", numCols.length, null],
-              ["범주형 컬럼", catCols.length, null],
-              ["결측값 총합", totalMissing.toLocaleString(), totalMissing > 0 ? "#BA7517" : "#1D9E75"],
-            ].map(([l, v, color]) => (
-              <div key={l} style={{ background: C.bgS, borderRadius: "var(--border-radius-md)", padding: "10px 12px" }}>
-                <div style={{ fontSize: 11, color: C.txS, marginBottom: 3 }}>{l}</div>
-                <div style={{ fontSize: 16, fontWeight: 500, color: color || C.tx, fontFamily: "var(--font-mono)" }}>{v}</div>
-              </div>
-            ))}
-          </div>
-
-          {numCols.length > 0 && (
-            <ChartCard title="숫자형 컬럼 분포 (히스토그램)"
-              subtitle={numCols.slice(0, 4).map(c => c.name).join(" · ")}
-              desc="막대가 한쪽으로 치우치면 왜도가 있는 데이터입니다. 양 끝에 극단값이 있으면 이상치(Outlier)를 의심해 보세요.">
-              <div style={{ display: "grid", gridTemplateColumns: numCols.length > 1 ? "1fr 1fr" : "1fr", gap: 16 }}>
-                {numCols.slice(0, 4).map(col => (
-                  <div key={col.name}>
-                    <div style={{ fontSize: 11, color: C.txS, marginBottom: 3, fontFamily: "var(--font-mono)" }}>
-                      {col.name}
-                      <span style={{ color: C.txT, marginLeft: 6 }}>평균 {col.stats.mean} · 표준편차 {col.stats.std}</span>
-                    </div>
-                    <HistChart ds={ds} col={col.name} />
-                  </div>
-                ))}
-              </div>
-            </ChartCard>
-          )}
-
-          {catCols.length > 0 && (
-            <ChartCard title="범주형 컬럼 빈도"
-              subtitle={catCols.slice(0, 3).map(c => c.name).join(" · ")}
-              desc="특정 범주가 압도적으로 많으면 클래스 불균형(Imbalanced) 데이터입니다. ML 분류 시 주의가 필요합니다.">
-              <div style={{ display: "grid", gridTemplateColumns: catCols.length > 1 ? "1fr 1fr" : "1fr", gap: 18 }}>
-                {catCols.slice(0, 4).map(col => (
-                  <div key={col.name}>
-                    <div style={{ fontSize: 11, color: C.txS, marginBottom: 3, fontFamily: "var(--font-mono)" }}>
-                      {col.name}
-                      <span style={{ color: C.txT, marginLeft: 6 }}>고유값 {col.stats.unique}개</span>
-                    </div>
-                    <BarFreq ds={ds} col={col.name} topN={8} />
-                  </div>
-                ))}
-              </div>
-            </ChartCard>
-          )}
-
-          {numCols.length >= 2 && (
-            <ChartCard title="상관관계 히트맵"
-              subtitle="숫자형 컬럼 간 피어슨 상관계수 (최대 10개 컬럼)"
-              desc="파란색 진할수록 양의 상관(같이 증가), 빨간색 진할수록 음의 상관(반대 방향). |0.7| 이상이면 강한 관계입니다.">
-              <CorrHeatmap ds={ds} />
-            </ChartCard>
-          )}
-
-          {totalMissing > 0 && (
-            <ChartCard title="결측값 현황"
-              subtitle="컬럼별 결측 비율 (빨강 30% 이상, 주황 10% 이상)"
-              desc="결측 비율이 높은 컬럼은 분석 신뢰도를 낮춥니다. 전처리 탭에서 평균/최빈값 채우기 또는 컬럼 제거를 검토하세요.">
-              <MissingChart ds={ds} />
-            </ChartCard>
-          )}
-
-          {catCols.length > 0 && numCols.length > 0 && (
-            <ChartCard title={`${catCols[0].name} 별 ${numCols[0].name} 평균`}
-              subtitle="범주 간 수치 차이 비교"
-              desc="범주 간 평균 차이가 클수록 해당 범주 컬럼이 예측 모델에서 중요한 피처일 가능성이 높습니다.">
-              <GroupedBar ds={ds} catCol={catCols[0].name} numCol={numCols[0].name} />
-            </ChartCard>
-          )}
-        </div>
-      )}
-    </div>
-  );
+// ── AI 응답에서 차트 스펙 JSON 추출 ────────────────────────────────────────────
+function extractChartSpecs(text) {
+  const m = text.match(/```json\s*([\s\S]*?)```\s*$/) || text.match(/```json\s*([\s\S]*?)```/);
+  if (m) {
+    try {
+      const obj = JSON.parse(m[1]);
+      if (Array.isArray(obj?.charts) && obj.charts.length) {
+        return { clean: text.replace(m[0], "").trim(), specs: obj.charts.slice(0, 4) };
+      }
+    } catch { /* JSON 파싱 실패 시 원문 그대로 표시 */ }
+  }
+  return { clean: text, specs: null };
 }
 
 // ── AI 결과 카드에 포함되는 관련 차트 (기본 펼침) ────────────────────────────────
@@ -338,7 +264,8 @@ export function EDATab({ allDs, summaryResults }) {
     setError(""); setLoading(true);
     try {
       const prompt = buildPrompt(ds, aType, customQ, sendMode, sampleN, sumDs);
-      const result = await callOpenRouter(apiKey.trim(), model, prompt);
+      const raw = await callOpenRouter(apiKey.trim(), model, prompt);
+      const { clean, specs } = extractChartSpecs(raw);
       const tl = ATYPES.find(t => t.id === aType)?.label || aType;
       setResults(p => [{
         id: crypto.randomUUID(),
@@ -347,7 +274,8 @@ export function EDATab({ allDs, summaryResults }) {
         aType,
         type: tl,
         question: aType === "custom" ? customQ : tl,
-        result,
+        result: clean,
+        chartSpecs: specs,
         ts: new Date().toLocaleTimeString(),
       }, ...p]);
     } catch (e) {
@@ -365,9 +293,6 @@ export function EDATab({ allDs, summaryResults }) {
 
   return (
     <div>
-      {/* 자동 시각화 섹션 */}
-      {ds && <AutoChartSection ds={ds} />}
-
       {/* API 키 */}
       <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
         <div style={{ padding: "11px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`,
@@ -524,6 +449,7 @@ export function EDATab({ allDs, summaryResults }) {
 
       {results.map(r => {
         const chartDs = allDs.find(d => d.id === r.dsId);
+        const validSpecs = chartDs && r.chartSpecs ? r.chartSpecs.filter(s => specValid(chartDs, s)) : [];
         return (
           <div key={r.id} style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)",
             overflow: "hidden", marginBottom: 14 }}>
@@ -558,8 +484,22 @@ export function EDATab({ allDs, summaryResults }) {
                 <MdBlock text={r.result} />
               </div>
 
-              {/* 관련 차트 (항상 표시) */}
-              {chartDs && r.aType !== "custom" && (
+              {/* AI 추천 차트 — AI가 응답에 포함한 차트 스펙을 그대로 렌더링 */}
+              {validSpecs.length > 0 ? (
+                <div style={{ flex: "1 1 340px", overflowY: "auto", maxHeight: 600 }}>
+                  <div style={{ padding: "14px 18px", borderTop: `0.5px solid ${C.bd}`, background: C.bgS }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: C.txS, marginBottom: 10,
+                      textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      📊 AI 추천 차트
+                    </div>
+                    {validSpecs.map((s, i) => (
+                      <ChartCard key={i} title={s.title || `${s.x || s.y} 차트`} desc={s.reason}>
+                        <SpecChart ds={chartDs} spec={s} />
+                      </ChartCard>
+                    ))}
+                  </div>
+                </div>
+              ) : chartDs && r.aType !== "custom" && (
                 <div style={{ flex: "1 1 340px", overflowY: "auto", maxHeight: 600 }}>
                   <ResultChartsPanel ds={chartDs} aType={r.aType} />
                 </div>
@@ -573,7 +513,7 @@ export function EDATab({ allDs, summaryResults }) {
         <div style={{ textAlign: "center", padding: "36px", color: C.txT, fontSize: 13,
           border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)" }}>
           {ds
-            ? "위 시각화를 먼저 확인하고, API 키 입력 후 AI 분석을 실행해 보세요."
+            ? "API 키 입력 후 AI 분석을 실행하면, 분석 결과와 함께 AI가 추천하는 차트가 표시됩니다. (일반 시각화는 ⑤ 차트 탭 이용)"
             : "파일을 선택해 주세요."}
         </div>
       )}

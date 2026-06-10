@@ -1,5 +1,5 @@
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
+  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { C, PALETTE } from "../constants";
@@ -252,5 +252,157 @@ export function GroupedBar({ ds, catCol, numCol, topN = 12, barDir = "h", palett
         </Bar>
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+// ── 범용 XY 차트 — [{name, value}] 데이터를 막대/선/파이로 ─────────────────────
+export function XYChart({ data, type = "bar", barDir = "v", palette, valueName = "값" }) {
+  const colors = palette || PALETTE;
+  if (!data?.length) return <NoData />;
+
+  if (type === "pie") {
+    const top = data.slice(0, 10);
+    const other = data.slice(10).reduce((a, d) => a + d.value, 0);
+    const pd = [...top, ...(other > 0 ? [{ name: "기타", value: other }] : [])];
+    const R = Math.PI / 180;
+    const lbl = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+      if (percent < 0.04) return null;
+      const r = innerRadius + (outerRadius - innerRadius) * 0.55;
+      return (
+        <text x={cx + r * Math.cos(-midAngle * R)} y={cy + r * Math.sin(-midAngle * R)}
+          fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11}>
+          {`${(percent * 100).toFixed(0)}%`}
+        </text>
+      );
+    };
+    return (
+      <ResponsiveContainer width="100%" height={280}>
+        <PieChart>
+          <Pie data={pd} cx="50%" cy="50%" outerRadius={100} dataKey="value" labelLine={false} label={lbl}>
+            {pd.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+          </Pie>
+          <Tooltip formatter={(v, n) => [v.toLocaleString(), n]}
+            contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === "line") {
+    const rotateX = data.length > 7;
+    return (
+      <ResponsiveContainer width="100%" height={260}>
+        <LineChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: rotateX ? 60 : 24 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
+          <XAxis dataKey="name" tick={{ fontSize: 10, fill: C.txS, ...(rotateX ? { angle: -40, textAnchor: "end" } : {}) }}
+            height={rotateX ? 66 : 28} interval={0} />
+          <YAxis tick={{ fontSize: 10, fill: C.txS }} tickFormatter={v => v.toLocaleString()} />
+          <Tooltip formatter={v => [v.toLocaleString(), valueName]}
+            contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Line type="monotone" dataKey="value" name={valueName} stroke={colors[0]} strokeWidth={2} dot={{ r: 3 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  // 막대 — 가로
+  if (barDir === "h") {
+    return (
+      <ResponsiveContainer width="100%" height={Math.max(200, data.length * 28)}>
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 10, fill: C.txS }} tickFormatter={v => v.toLocaleString()} />
+          <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: C.txS }} width={96} />
+          <Tooltip formatter={v => [v.toLocaleString(), valueName]}
+            contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Bar dataKey="value" name={valueName} radius={[0, 3, 3, 0]}>
+            {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  // 막대 — 세로 (기본): 범주가 X축, 값이 Y축
+  const rotateX = data.length > 7;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: rotateX ? 64 : 24 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
+        <XAxis dataKey="name" type="category"
+          tick={{ fontSize: 10, fill: C.txS, ...(rotateX ? { angle: -40, textAnchor: "end" } : {}) }}
+          height={rotateX ? 70 : 28} interval={0} />
+        <YAxis type="number" tick={{ fontSize: 10, fill: C.txS }} tickFormatter={v => v.toLocaleString()} />
+        <Tooltip formatter={v => [v.toLocaleString(), valueName]}
+          contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+        <Bar dataKey="value" name={valueName} radius={[3, 3, 0, 0]}>
+          {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── AI 추천 차트 스펙 렌더링 ───────────────────────────────────────────────────
+// spec: { type: "bar"|"line"|"pie"|"hist"|"scatter", x, y, agg, title, reason }
+export function specValid(ds, spec) {
+  if (!spec || !spec.type) return false;
+  const has = c => ds.columns.includes(c);
+  if (spec.type === "hist")    return has(spec.y) || has(spec.x);
+  if (spec.type === "scatter") return has(spec.x) && has(spec.y);
+  return has(spec.x);
+}
+
+export function SpecChart({ ds, spec, palette }) {
+  const colors = palette || PALETTE;
+  const has = c => ds.columns.includes(c);
+
+  if (spec.type === "hist") {
+    return <HistChart ds={ds} col={has(spec.y) ? spec.y : spec.x} />;
+  }
+
+  if (spec.type === "scatter") {
+    const data = ds.rows
+      .map(r => ({ x: parseFloat(r[spec.x]), y: parseFloat(r[spec.y]) }))
+      .filter(p => !isNaN(p.x) && !isNaN(p.y)).slice(0, 1000);
+    if (!data.length) return <NoData />;
+    return (
+      <ResponsiveContainer width="100%" height={260}>
+        <ScatterChart margin={{ top: 4, right: 8, left: 0, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.bd} />
+          <XAxis type="number" dataKey="x" name={spec.x} tick={{ fontSize: 10, fill: C.txS }}
+            label={{ value: spec.x, position: "insideBottom", offset: -14, fontSize: 10, fill: C.txS }} />
+          <YAxis type="number" dataKey="y" name={spec.y} tick={{ fontSize: 10, fill: C.txS }} />
+          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6, border: `0.5px solid ${C.bd}` }} />
+          <Scatter data={data} fill={colors[1] || colors[0]} fillOpacity={0.5} />
+        </ScatterChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  // bar / line / pie — x 기준 집계
+  const agg = spec.agg || (has(spec.y) ? "mean" : "count");
+  const groups = {};
+  ds.rows.forEach(r => {
+    const k = String(r[spec.x] ?? "");
+    if (!groups[k]) groups[k] = { sum: 0, cnt: 0, n: 0 };
+    groups[k].n++;
+    const v = has(spec.y) ? parseFloat(r[spec.y]) : NaN;
+    if (!isNaN(v)) { groups[k].sum += v; groups[k].cnt++; }
+  });
+  let data = Object.entries(groups).map(([name, g]) => ({
+    name,
+    value: agg === "count" ? g.n
+      : agg === "sum" ? +g.sum.toFixed(3)
+      : g.cnt ? +(g.sum / g.cnt).toFixed(3) : 0,
+  }));
+  if (spec.type === "line") data.sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
+  else data.sort((a, b) => b.value - a.value);
+  data = data.slice(0, spec.type === "pie" ? 10 : 15);
+  const aggLabel = { count: "건수", sum: "합계", mean: "평균" }[agg] || agg;
+  return (
+    <XYChart data={data} type={spec.type} palette={colors}
+      valueName={has(spec.y) ? `${spec.y} ${aggLabel}` : aggLabel} />
   );
 }
