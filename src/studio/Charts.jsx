@@ -1,8 +1,52 @@
+import { useRef } from "react";
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { C, PALETTE } from "../constants";
+
+// ── 차트 PNG 다운로드 — 컨테이너 내부 첫 SVG를 2배 해상도 PNG로 저장 ──────────
+export function downloadChartPNG(container, filename = "chart") {
+  const svg = container?.querySelector("svg");
+  if (!svg) { alert("다운로드할 차트를 찾을 수 없습니다."); return; }
+  const rect = svg.getBoundingClientRect();
+  const w = Math.max(rect.width, 320), h = Math.max(rect.height, 200);
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("width", w);
+  clone.setAttribute("height", h);
+  const xml = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = w * 2; canvas.height = h * 2;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const a = document.createElement("a");
+    a.download = `${String(filename).replace(/[\\/:*?"<>|]/g, "_")}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  };
+  img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
+}
+
+// 차트 영역에 PNG 저장 버튼을 붙이는 래퍼 (ChartCard 미사용 차트용)
+export function DownloadableChart({ filename = "chart", children }) {
+  const ref = useRef(null);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button type="button" onClick={() => downloadChartPNG(ref.current, filename)}
+        title="PNG로 저장"
+        style={{ position: "absolute", top: 0, right: 0, zIndex: 2, fontSize: 10,
+          padding: "2px 7px", borderRadius: 5, cursor: "pointer",
+          background: C.bg, border: `0.5px solid ${C.bd}`, color: C.txS }}>
+        ⬇ PNG
+      </button>
+      {children}
+    </div>
+  );
+}
 
 // 대용량 배열 안전 min/max (spread 대신 reduce 사용)
 function safeMin(arr) { return arr.reduce((m, v) => v < m ? v : m, Infinity); }
@@ -16,19 +60,30 @@ export function NoData() {
 }
 
 export function ChartCard({ title, subtitle, desc, children }) {
+  const bodyRef = useRef(null);
   return (
     <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
-      <div style={{ padding: "10px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}` }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, color: C.txS, marginTop: 2 }}>{subtitle}</div>}
-        {desc && (
-          <div style={{ fontSize: 11, color: C.infoTx, marginTop: 5, lineHeight: 1.5,
-            padding: "5px 8px", background: C.info, borderRadius: 4 }}>
-            💡 {desc}
-          </div>
-        )}
+      <div style={{ padding: "10px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`,
+        display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 11, color: C.txS, marginTop: 2 }}>{subtitle}</div>}
+          {desc && (
+            <div style={{ fontSize: 11, color: C.infoTx, marginTop: 5, lineHeight: 1.5,
+              padding: "5px 8px", background: C.info, borderRadius: 4 }}>
+              💡 {desc}
+            </div>
+          )}
+        </div>
+        <button type="button" onClick={() => downloadChartPNG(bodyRef.current, title)}
+          title="차트를 PNG 이미지로 저장"
+          style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, cursor: "pointer",
+            background: C.bg, border: `0.5px solid ${C.bd}`, color: C.txS,
+            whiteSpace: "nowrap", flexShrink: 0 }}>
+          ⬇ PNG
+        </button>
       </div>
-      <div style={{ padding: "14px 14px 10px" }}>{children}</div>
+      <div ref={bodyRef} style={{ padding: "14px 14px 10px" }}>{children}</div>
     </div>
   );
 }

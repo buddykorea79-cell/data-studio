@@ -4,8 +4,65 @@ import { BarChart, Bar, LineChart, Line, ScatterChart, Scatter,
 import { C, PALETTE } from "../constants";
 import { Btn, Section, DsSelector, MdBlock } from "./UI";
 import { normalize, denorm, prepareFeatures, trainTestSplit,
-  linearRegression, logisticRegression, kmeans, mlp, sigmoid, relu, softmax, callGemini,
+  linearRegression, logisticRegression, kmeans, mlp, sigmoid, relu, softmax,
 } from "../utils/mlUtils";
+import { ChartCard, SpecChart, specValid, DownloadableChart } from "./Charts";
+
+const OR_MODEL = "deepseek/deepseek-v4-flash";
+
+async function callOpenRouter(apiKey, systemPrompt, userMsg, maxTokens = 2000) {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": window.location.origin,
+      "X-Title": "Data Studio",
+    },
+    body: JSON.stringify({
+      model: OR_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userMsg },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+    }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e?.error?.message || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+// AI 응답에서 JSON 객체 추출 (코드블록 우선, 실패 시 본문에서 탐색)
+function extractJSON(text) {
+  const fenced = text.match(/```json\s*([\s\S]*?)```/) || text.match(/```\s*([\s\S]*?)```/);
+  const candidates = [fenced?.[1], text].filter(Boolean);
+  for (const cand of candidates) {
+    const start = cand.indexOf("{");
+    const end   = cand.lastIndexOf("}");
+    if (start < 0 || end <= start) continue;
+    try { return JSON.parse(cand.slice(start, end + 1)); } catch { /* 다음 후보 */ }
+  }
+  return null;
+}
+
+// AI 해석 응답에서 차트 스펙 분리 (EDA 탭과 동일 형식)
+function extractChartSpecs(text) {
+  const m = text.match(/```json\s*([\s\S]*?)```\s*$/) || text.match(/```json\s*([\s\S]*?)```/);
+  if (m) {
+    try {
+      const obj = JSON.parse(m[1]);
+      if (Array.isArray(obj?.charts) && obj.charts.length) {
+        return { clean: text.replace(m[0], "").trim(), specs: obj.charts.slice(0, 3) };
+      }
+    } catch { /* 원문 그대로 */ }
+  }
+  return { clean: text, specs: null };
+}
 
 // ── Grade helpers ─────────────────────────────────────────────────────────────
 function gradeR2(v) {
@@ -304,25 +361,106 @@ export function MLTab({ allDs, apiKey }) {
   const [epochs, setEpochs] = useState(300);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
-  const [geminiLoading, setGeminiLoading] = useState(false);
-  const [geminiText, setGeminiText] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiText, setAiText] = useState("");
+  const [aiSpecs, setAiSpecs] = useState(null);
   const [error, setError] = useState("");
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
+
+  // ── AI 제안 (Step 0) 상태 ──
+  const [orKey, setOrKey] = useState(() => apiKey || sessionStorage.getItem("openrouter_key") || "");
+  const [showKey, setShowKey] = useState(false);
+  const [userCtx, setUserCtx] = useState("");
+  const [proposals, setProposals] = useState(null);
+  const [prevTitles, setPrevTitles] = useState([]);
+  const [propLoading, setPropLoading] = useState(false);
+  const [propError, setPropError] = useState("");
+
+  // ── 모델 비교용 실행 이력 ──
+  const [runHistory, setRunHistory] = useState([]);
+
+  const saveKey = k => { setOrKey(k); try { sessionStorage.setItem("openrouter_key", k); } catch {} };
 
   const ds = allDs.find(d => d.id === selId);
   const prevId = useRef(selId);
   if (prevId.current !== selId) {
     prevId.current = selId;
     setTask(""); setModelId(""); setFeatureCols([]); setTargetCol("");
-    setResult(null); setGeminiText(""); setError(""); setStep(1);
+    setResult(null); setAiText(""); setAiSpecs(null); setError(""); setStep(0);
+    setProposals(null); setPrevTitles([]); setPropError(""); setRunHistory([]);
   }
 
   const numCols = ds ? ds.colMeta.filter(c => c.type==="number").map(c => c.name) : [];
   const catCols = ds ? ds.colMeta.filter(c => c.type==="category" || c.type==="text").map(c => c.name) : [];
   const allCols = ds ? ds.columns : [];
 
+  // AI 제안 카드 클릭 → 태스크/모델/타겟/피처 자동 세팅 후 Step 2로
+  const applyProposal = p => {
+    const validTasks = ["regression", "classification", "clustering", "timeseries"];
+    if (!validTasks.includes(p.task)) { setPropError("지원하지 않는 분석 유형입니다: " + p.task); return; }
+    const cols = ds ? ds.columns : [];
+    const tgt = cols.includes(p.target) ? p.target : "";
+    const feats = (Array.isArray(p.features) ? p.features : [])
+      .filter(c => cols.includes(c) && c !== tgt);
+    setTask(p.task);
+    setModelId(p.model || "");
+    setTargetCol(p.task === "clustering" ? "" : tgt);
+    setFeatureCols(feats.length ? feats : numCols.filter(c => c !== tgt).slice(0, 5));
+    setElbowPreview(null); setKClusters(null);
+    setResult(null); setAiText(""); setAiSpecs(null); setError("");
+    setStep(2);
+  };
+
+  // AI에게 분석 3가지 제안 요청 (다시 제안 시 이전 제안 제외)
+  const fetchProposals = async (excludePrev = false) => {
+    if (!orKey.trim()) { setPropError("OpenRouter API 키를 입력해 주세요."); return; }
+    if (!ds) return;
+    setPropLoading(true); setPropError("");
+    try {
+      const colInfo = ds.colMeta.map(c => {
+        let s = `- ${c.name} (${c.type}): 고유 ${c.stats.unique}개, 결측 ${c.stats.nullCount}개`;
+        if (c.type === "number" && c.stats.mean !== undefined)
+          s += `, 평균 ${c.stats.mean}, min ${c.stats.min}, max ${c.stats.max}`;
+        if (c.stats.topValues) s += `, 상위값: ${c.stats.topValues.slice(0, 3).map(([v]) => v).join(",")}`;
+        return s;
+      }).join("\n");
+
+      const exclusion = excludePrev && prevTitles.length
+        ? `\n\n## 제외 조건\n다음 제안들과 겹치지 않는 새로운 분석을 제안하세요:\n${prevTitles.map(t => `- ${t}`).join("\n")}`
+        : "";
+      const ctx = userCtx.trim() ? `\n\n## 사용자가 알려준 데이터 배경\n${userCtx.trim()}\n이 배경을 반드시 제안에 반영하세요.` : "";
+
+      const sys = `당신은 머신러닝 교육 전문가입니다. 초보자가 따라할 수 있는 ML/DL 분석을 제안합니다.
+사용 가능한 분석과 모델:
+- regression (숫자 예측): linear(선형회귀), ridge(릿지회귀), knn_reg(KNN회귀)
+- classification (분류): logistic(로지스틱회귀), knn_cls(KNN분류), dtree(의사결정나무)
+- clustering (군집화): kmeans
+- timeseries (시계열): ma(이동평균), ewm(지수가중), trend(추세분해)
+반드시 아래 JSON 형식으로만 응답하세요. 컬럼명은 실제 데이터의 컬럼명만 사용하세요.
+\`\`\`json
+{"proposals":[{"title":"제안 제목","task":"regression","model":"linear","target":"타겟컬럼명","features":["피처컬럼명1","피처컬럼명2"],"difficulty":"초급","reason":"이 분석과 모델을 추천하는 이유 (2~3문장)","use_case":"비즈니스 활용 예시 1문장"}]}
+\`\`\`
+- 정확히 3개의 서로 다른 제안
+- regression의 target은 숫자형, classification의 target은 범주형/텍스트 컬럼
+- clustering은 target 없이 features만, timeseries는 target에 숫자형 컬럼 1개
+- difficulty: "초급" | "중급" | "고급"`;
+
+      const user = `## 데이터셋: ${ds.name}\n- ${ds.rowCount.toLocaleString()}행 × ${ds.columns.length}열\n\n## 컬럼 정보\n${colInfo}${ctx}${exclusion}`;
+      const raw = await callOpenRouter(orKey.trim(), sys, user);
+      const obj = extractJSON(raw);
+      const list = Array.isArray(obj?.proposals) ? obj.proposals.slice(0, 3) : null;
+      if (!list || !list.length) throw new Error("AI 응답을 해석하지 못했습니다. 다시 시도해 주세요.");
+      setProposals(list);
+      setPrevTitles(t => [...t, ...list.map(p => p.title).filter(Boolean)].slice(-9));
+    } catch (e) {
+      setPropError("제안 실패: " + e.message);
+    } finally {
+      setPropLoading(false);
+    }
+  };
+
   const selectTask = t => {
-    setTask(t); setResult(null); setGeminiText(""); setError("");
+    setTask(t); setResult(null); setAiText(""); setAiSpecs(null); setError("");
     const defaults = { regression:"linear", classification:"logistic", clustering:"kmeans", timeseries:"ma" };
     setModelId(defaults[t] || "");
     setElbowPreview(null); setKClusters(null);
@@ -355,7 +493,7 @@ export function MLTab({ allDs, apiKey }) {
     if (task !== "clustering" && task !== "timeseries" && !targetCol)
       return setError("타겟 컬럼을 선택해 주세요.");
 
-    setError(""); setRunning(true); setResult(null); setGeminiText("");
+    setError(""); setRunning(true); setResult(null); setAiText(""); setAiSpecs(null);
     setTimeout(() => {
       try {
         // ── 시계열 (prepareFeatures 불필요)
@@ -442,11 +580,15 @@ export function MLTab({ allDs, apiKey }) {
           const ssR = tA.reduce((s, a, i) => s + (a - tP[i]) ** 2, 0);
           const ssT = tA.reduce((s, a) => { const m = tA.reduce((x, b) => x + b, 0) / tA.length; return s + (a - m) ** 2; }, 0);
           const imp = model.w ? allFeatNames.map((n, j) => ({ name: n, importance: +Math.abs(model.w[j]).toFixed(4) })).sort((a, b) => b.importance - a.importance) : [];
+          const regTestR2 = +(1 - ssR / (ssT || 1)).toFixed(4);
+          const regTestRmse = +Math.sqrt(ssR / tA.length).toFixed(4);
           setResult({ task: "regression", modelId,
             trainR2: model.r2, trainRmse: model.rmse,
-            testR2: +(1 - ssR / (ssT || 1)).toFixed(4), testRmse: +Math.sqrt(ssR / tA.length).toFixed(4),
+            testR2: regTestR2, testRmse: regTestRmse,
             losses: model.losses, importance: imp, testActual: tA, testPreds: tP,
             nTrain: XTr.length, nTest: XTe.length });
+          setRunHistory(p => [...p, { task: "regression", target: targetCol, modelId,
+            metric: "R²", value: regTestR2, sub: `RMSE ${regTestRmse}`, ts: new Date().toLocaleTimeString() }]);
 
         // ── 분류
         } else if (task === "classification") {
@@ -516,6 +658,8 @@ export function MLTab({ allDs, apiKey }) {
           y.forEach((actual, i) => { if (cm[actual]) cm[actual][trPreds[i]] = (cm[actual][trPreds[i]] || 0) + 1; });
           setResult({ task: "classification", modelId, trainAcc, testAcc, classes,
             cm, losses: lossData, importance: impData, nTrain: XTr.length, nTest: XTe.length });
+          setRunHistory(p => [...p, { task: "classification", target: targetCol, modelId,
+            metric: "정확도", value: testAcc, sub: `학습 ${trainAcc}%`, ts: new Date().toLocaleTimeString() }]);
 
         // ── 군집화
         } else if (task === "clustering") {
@@ -535,25 +679,41 @@ export function MLTab({ allDs, apiKey }) {
       setRunning(false);
     }, 60);
   };
-  const askGemini = async () => {
-    if (!apiKey || !result) return;
-    setGeminiLoading(true); setGeminiText("");
+  const askAI = async () => {
+    if (!orKey.trim() || !result) return;
+    setAiLoading(true); setAiText(""); setAiSpecs(null);
     try {
       const summary = JSON.stringify({
-        task:result.task, 데이터셋:ds?.name, 행수:ds?.rowCount,
+        task:result.task, 모델:modelId, 데이터셋:ds?.name, 행수:ds?.rowCount,
+        타겟:targetCol, 피처:featureCols,
         성능:{ R2:result.testR2, RMSE:result.testRmse, 정확도:result.testAcc },
         상위피처:result.importance?.slice(0,5),
         클러스터크기:result.sizes, 클래스수:result.classes?.length,
       }, null, 2);
-      const prompt = "당신은 친절한 데이터 분석 선생님입니다. 머신러닝 입문자에게 아래 결과를 쉽게 한국어로 설명해 주세요.\n\n"
-        + summary
-        + "\n\n1. 모델이 하는 일을 쉽게 설명\n2. 성능 평가\n3. 가장 중요한 피처와 의미\n4. 활용 방법\n5. 개선 방향";
-      const text = await callGemini(apiKey, prompt);
-      setGeminiText(text);
+      const sys = "당신은 친절한 데이터 분석 선생님입니다. 머신러닝 입문자에게 결과를 쉽게 한국어로 설명합니다.";
+      const colList = ds.colMeta.map(c => `${c.name}(${c.type})`).join(", ");
+      const user = `아래 머신러닝 결과를 설명해 주세요.\n\n${summary}\n
+1. 모델이 하는 일을 쉽게 설명
+2. 성능 평가 (수치의 의미 포함)
+3. 가장 중요한 피처와 의미
+4. 활용 방법
+5. 개선 방향
+6. ## 다음 분석 제안 — 이 결과를 바탕으로 해볼 만한 다음 분석 2가지
+
+## 차트 추천 (필수)
+답변 맨 마지막에 아래 형식의 json 코드블록을 추가하세요. 분석 결과를 이해하는 데 도움이 되는 차트 1~2개를 추천하고, 컬럼명은 실제 컬럼(${colList})만 사용하세요.
+\`\`\`json
+{"charts":[{"type":"bar","x":"범주형컬럼","y":"숫자컬럼","agg":"mean","title":"차트 제목","reason":"추천 이유"}]}
+\`\`\`
+- type: "bar" | "line" | "pie" | "hist"(y만) | "scatter"(x·y 숫자)`;
+      const raw = await callOpenRouter(orKey.trim(), sys, user, 2500);
+      const { clean, specs } = extractChartSpecs(raw);
+      setAiText(clean);
+      setAiSpecs(specs);
     } catch (e) {
-      setGeminiText("오류: " + e.message);
+      setAiText("오류: " + e.message);
     }
-    setGeminiLoading(false);
+    setAiLoading(false);
   };
 
   if (!ds) return <div style={{ padding:48, textAlign:"center", color:C.txT }}>파일을 업로드해 주세요.</div>;
@@ -588,9 +748,10 @@ export function MLTab({ allDs, apiKey }) {
 
 
   // ── Step indicator
+  const STEPS = [{n:0,label:"AI 제안"},{n:1,label:"목표 선택"},{n:2,label:"컬럼 확인"},{n:3,label:"결과 확인"}];
   const StepBar = () => (
-    <div style={{ display:"flex", alignItems:"center", gap:0, marginBottom:20 }}>
-      {[{n:1,label:"목표 선택"},{n:2,label:"컬럼 확인"},{n:3,label:"결과 확인"}].map((s,i) => (
+    <div style={{ display:"flex", alignItems:"center", gap:0, marginBottom:20, flexWrap:"wrap" }}>
+      {STEPS.map((s,i) => (
         <div key={s.n} style={{ display:"flex", alignItems:"center" }}>
           <div onClick={() => step > s.n && setStep(s.n)} style={{
             display:"flex", alignItems:"center", gap:6, padding:"6px 14px", borderRadius:20,
@@ -600,27 +761,147 @@ export function MLTab({ allDs, apiKey }) {
             <span style={{ width:20, height:20, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center",
               background: step===s.n ? C.infoTx : step>s.n ? C.successTx : C.bd,
               color:"#fff", fontSize:11, fontWeight:500 }}>
-              {step > s.n ? "✓" : s.n}
+              {step > s.n ? "✓" : s.n===0 ? "✨" : s.n}
             </span>
             <span style={{ fontSize:12, fontWeight:step===s.n?500:400,
               color: step===s.n ? C.infoTx : step>s.n ? C.successTx : C.txS }}>
               {s.label}
             </span>
           </div>
-          {i < 2 && <div style={{ width:24, height:1, background:C.bd }}/>}
+          {i < STEPS.length-1 && <div style={{ width:20, height:1, background:C.bd }}/>}
         </div>
       ))}
     </div>
   );
 
+  const DIFF_CLR = { "초급":{bg:"#E1F5EE",tx:"#0F6E56"}, "중급":{bg:"#FAEEDA",tx:"#BA7517"}, "고급":{bg:"#FCEBEB",tx:"#A32D2D"} };
+  const TASK_LABEL = { regression:"📈 숫자 예측", classification:"🏷️ 분류", clustering:"🔵 군집화", timeseries:"📉 시계열" };
+
   return (
     <div>
       <StepBar/>
 
+      {/* ── STEP 0: AI 분석 제안 */}
+      {step === 0 && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6, flexWrap:"wrap", gap:8 }}>
+            <div>
+              <div style={{ fontSize:15, fontWeight:500, color:C.tx }}>✨ AI에게 분석 방법을 제안받아 보세요</div>
+              <div style={{ fontSize:13, color:C.txS, marginTop:3 }}>
+                데이터 정보를 AI에게 보내면 적합한 예측·분류 분석 3가지를 제안받습니다. 실제 학습은 브라우저에서 직접 실행됩니다.
+              </div>
+            </div>
+            <Btn small onClick={() => setStep(1)}>건너뛰고 직접 선택 →</Btn>
+          </div>
+
+          <DsSelector datasets={allDs} value={selId} onChange={setSelId} label="분석할 데이터"/>
+
+          {/* API 키 */}
+          <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:12, marginTop:4 }}>
+            <span style={{ fontSize:12, color:C.txS, whiteSpace:"nowrap" }}>🔑 OpenRouter 키</span>
+            <input type={showKey ? "text" : "password"} placeholder="sk-or-v1-... (AI 분석 탭과 동일한 키)"
+              value={orKey} onChange={e => saveKey(e.target.value)}
+              style={{ flex:1, fontSize:12, padding:"6px 10px", borderRadius:"var(--border-radius-md)",
+                border:`0.5px solid ${orKey ? C.successTx+"88" : C.bdS}`, background:C.bg, color:C.tx,
+                fontFamily:"var(--font-mono)" }}/>
+            <button type="button" onClick={() => setShowKey(p => !p)}
+              style={{ fontSize:11, padding:"3px 8px", cursor:"pointer", borderRadius:"var(--border-radius-md)",
+                background:"transparent", border:`0.5px solid ${C.bdS}`, color:C.txS }}>
+              {showKey ? "숨기기" : "보기"}
+            </button>
+          </div>
+
+          {/* 도메인 컨텍스트 */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:12, color:C.txS, marginBottom:4, fontWeight:500 }}>
+              💬 내가 아는 내용 알려주기 (선택)
+            </div>
+            <textarea value={userCtx} onChange={e => setUserCtx(e.target.value)} rows={2}
+              placeholder={"예: 이 데이터는 카페 매출 기록입니다. 메뉴별 매출을 예측하고 싶어요.\n예: 분류 분석은 빼고 제안해 주세요."}
+              style={{ width:"100%", fontSize:13, padding:"8px 10px", borderRadius:"var(--border-radius-md)",
+                border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx,
+                resize:"vertical", boxSizing:"border-box", lineHeight:1.6 }}/>
+          </div>
+
+          {propError && (
+            <div style={{ fontSize:12, color:"#A32D2D", background:"#FCEBEB",
+              padding:"8px 10px", borderRadius:"var(--border-radius-md)", marginBottom:10 }}>
+              {propError}
+            </div>
+          )}
+
+          <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+            <Btn variant="primary" onClick={() => fetchProposals(false)} disabled={propLoading || !orKey}>
+              {propLoading ? "AI가 데이터를 분석 중..." : proposals ? "✨ 새로 제안받기" : "✨ AI 분석 제안받기"}
+            </Btn>
+            {proposals && (
+              <Btn onClick={() => fetchProposals(true)} disabled={propLoading}>
+                🔄 다시 제안 (이전 제안 제외)
+              </Btn>
+            )}
+          </div>
+
+          {/* 제안 카드 */}
+          {proposals && (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:12 }}>
+              {proposals.map((p, i) => {
+                const dc = DIFF_CLR[p.difficulty] || DIFF_CLR["중급"];
+                const tgtOk = !p.target || ds?.columns.includes(p.target);
+                return (
+                  <div key={i} style={{
+                    border:`1.5px solid ${C.bdS}`, borderRadius:"var(--border-radius-lg)",
+                    padding:16, background:C.bg, display:"flex", flexDirection:"column", gap:8,
+                    boxShadow:"0 1px 4px rgba(0,0,0,0.06)",
+                  }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                      <span style={{ fontSize:11, padding:"2px 8px", borderRadius:10, background:"#E6F1FB", color:"#185FA5", fontWeight:500 }}>
+                        {TASK_LABEL[p.task] || p.task}
+                      </span>
+                      <span style={{ fontSize:11, padding:"2px 8px", borderRadius:10, background:dc.bg, color:dc.tx, fontWeight:500 }}>
+                        {p.difficulty || "중급"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize:14, fontWeight:600, color:C.tx }}>{p.title}</div>
+                    <div style={{ fontSize:12, color:C.txS, lineHeight:1.6 }}>{p.reason}</div>
+                    {p.use_case && (
+                      <div style={{ fontSize:11, color:C.infoTx, background:C.info, borderRadius:6, padding:"6px 8px", lineHeight:1.5 }}>
+                        💡 {p.use_case}
+                      </div>
+                    )}
+                    <div style={{ fontSize:11, color:C.txS, fontFamily:"var(--font-mono)", lineHeight:1.7 }}>
+                      {p.target && <div>🎯 타겟: <strong style={{ color: tgtOk ? C.tx : "#A32D2D" }}>{p.target}{!tgtOk && " (컬럼 없음)"}</strong></div>}
+                      {p.features?.length > 0 && <div>📊 피처: {p.features.join(", ")}</div>}
+                      <div>🤖 모델: {p.model}</div>
+                    </div>
+                    <button type="button" onClick={() => applyProposal(p)} style={{
+                      marginTop:"auto", padding:"9px", fontSize:13, fontWeight:600, cursor:"pointer",
+                      borderRadius:"var(--border-radius-md)", border:"none",
+                      background:"linear-gradient(135deg,#185FA5 0%,#1D9E75 100%)", color:"#fff",
+                    }}>
+                      이 제안으로 시작 →
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {!proposals && !propLoading && (
+            <div style={{ textAlign:"center", padding:"28px 24px", color:C.txT, fontSize:13,
+              border:`0.5px dashed ${C.bd}`, borderRadius:"var(--border-radius-lg)" }}>
+              버튼을 누르면 컬럼 정보·통계가 AI에게 전송되고, 추천 타겟·피처·모델이 포함된 분석 3가지를 제안받습니다.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── STEP 1 */}
       {step === 1 && (
         <div>
-          <div style={{ fontSize:15, fontWeight:500, color:C.tx, marginBottom:6 }}>어떤 분석을 하고 싶으신가요?</div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+            <div style={{ fontSize:15, fontWeight:500, color:C.tx }}>어떤 분석을 하고 싶으신가요?</div>
+            <Btn small onClick={() => setStep(0)}>← AI 제안받기</Btn>
+          </div>
           <div style={{ fontSize:13, color:C.txS, marginBottom:16 }}>클릭하면 자동으로 설정됩니다</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:12 }}>
             {TASKS.map(t => (
@@ -895,32 +1176,78 @@ export function MLTab({ allDs, apiKey }) {
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
             <div style={{ fontSize:14, fontWeight:500, color:C.tx }}>📋 학습 결과</div>
             <div style={{ display:"flex", gap:8 }}>
-              <Btn small onClick={() => { setStep(2); setResult(null); setGeminiText(""); }}>← 다시 학습</Btn>
-              <Btn small onClick={() => { setTask(""); setStep(1); setResult(null); setGeminiText(""); }}>처음으로</Btn>
+              <Btn small onClick={() => { setStep(2); setResult(null); setAiText(""); setAiSpecs(null); }}>← 다시 학습</Btn>
+              <Btn small onClick={() => { setTask(""); setStep(0); setResult(null); setAiText(""); setAiSpecs(null); }}>처음으로</Btn>
             </div>
           </div>
 
           <EasyResultCard result={result} targetCol={targetCol}/>
 
+          {/* 모델 비교 — 같은 태스크·타겟으로 2회 이상 실행 시 */}
+          {(() => {
+            const comparable = runHistory.filter(h => h.task === result.task && h.target === targetCol);
+            if (comparable.length < 2) return null;
+            const best = Math.max(...comparable.map(h => h.value));
+            const mLabel = id => (MODELS[result.task] || []).find(m => m.id === id)?.label || id;
+            return (
+              <div style={{ border:"0.5px solid "+C.bd, borderRadius:"var(--border-radius-lg)", padding:16, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:500, color:C.tx, marginBottom:4 }}>⚖️ 모델 비교</div>
+                <div style={{ fontSize:11, color:C.txT, marginBottom:10 }}>
+                  같은 타겟("{targetCol}")으로 실행한 모델들의 성능입니다. 다른 모델로 다시 학습해 보세요.
+                </div>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead><tr style={{ background:C.bgS }}>
+                    {["모델", comparable[0].metric, "참고", "실행 시각"].map(h => (
+                      <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:C.txS, fontWeight:500, borderBottom:"0.5px solid "+C.bd }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {comparable.map((h, i) => (
+                      <tr key={i} style={{ borderBottom:"0.5px solid "+C.bd, background: h.value === best ? "#EAF3DE" : "transparent" }}>
+                        <td style={{ padding:"7px 10px", fontWeight:500, color:C.tx }}>
+                          {mLabel(h.modelId)}{h.value === best && <span style={{ marginLeft:6, fontSize:10, color:"#0F6E56" }}>🏆 최고</span>}
+                        </td>
+                        <td style={{ padding:"7px 10px", fontFamily:"var(--font-mono)", color:C.tx }}>{h.value}{h.metric === "정확도" ? "%" : ""}</td>
+                        <td style={{ padding:"7px 10px", color:C.txS }}>{h.sub}</td>
+                        <td style={{ padding:"7px 10px", color:C.txT }}>{h.ts}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
           <div style={{ border:"0.5px solid "+C.bd, borderRadius:"var(--border-radius-lg)", padding:16, marginBottom:16 }}>
-            <div style={{ fontSize:13, fontWeight:500, color:C.tx, marginBottom:4 }}>📊 상세 차트</div>
+            <div style={{ fontSize:13, fontWeight:500, color:C.tx, marginBottom:4 }}>📊 상세 차트 <span style={{ fontSize:10, color:C.txT, fontWeight:400 }}>각 차트의 ⬇ PNG 버튼으로 저장 가능</span></div>
             {result.losses?.length > 1 && (
-              <LossCurve data={result.losses}
-                xKey={result.task==="clustering" ? "iter" : "epoch"}
-                title={result.task==="clustering" ? "학습 진행도 (Inertia)" : "학습 진행도 (Loss)"}/>
+              <DownloadableChart filename="loss_curve">
+                <LossCurve data={result.losses}
+                  xKey={result.task==="clustering" ? "iter" : "epoch"}
+                  title={result.task==="clustering" ? "학습 진행도 (Inertia)" : "학습 진행도 (Loss)"}/>
+              </DownloadableChart>
             )}
             {result.task === "regression" && result.testActual && (
-              <ActualVsPred actual={result.testActual} predicted={result.testPreds}/>
+              <DownloadableChart filename="actual_vs_predicted">
+                <ActualVsPred actual={result.testActual} predicted={result.testPreds}/>
+              </DownloadableChart>
             )}
             {(result.task === "classification" || result.task === "neural") && result.cm && result.classes?.length <= 15 && (
               <MLConfMatrix cm={result.cm} classes={result.classes}/>
             )}
-            {result.importance?.length > 0 && <MLFeatChart data={result.importance}/>}
+            {result.importance?.length > 0 && (
+              <DownloadableChart filename="feature_importance">
+                <MLFeatChart data={result.importance}/>
+              </DownloadableChart>
+            )}
             {result.task === "clustering" && result.rowsWithCluster && featureCols.length >= 2 && (
-              <MLScatter rows={result.rowsWithCluster} xCol={featureCols[0]} yCol={featureCols[1]}
-                labelKey="_cluster" title={"그룹 분포 (" + featureCols[0] + " × " + featureCols[1] + ")"}/>
+              <DownloadableChart filename="cluster_scatter">
+                <MLScatter rows={result.rowsWithCluster} xCol={featureCols[0]} yCol={featureCols[1]}
+                  labelKey="_cluster" title={"그룹 분포 (" + featureCols[0] + " × " + featureCols[1] + ")"}/>
+              </DownloadableChart>
             )}
             {result.task === "clustering" && result.elbowData?.length > 1 && (
+              <DownloadableChart filename="elbow_curve">
               <div style={{ marginTop:16 }}>
                 <div style={{ fontSize:12, color:C.txS, fontWeight:500, marginBottom:4 }}>📐 엘보우 곡선 (최적 K 찾기)</div>
                 <div style={{ fontSize:11, color:C.txT, marginBottom:8 }}>
@@ -936,8 +1263,10 @@ export function MLTab({ allDs, apiKey }) {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+              </DownloadableChart>
             )}
             {result.task === "timeseries" && result.chartData?.length > 0 && (
+              <DownloadableChart filename="timeseries">
               <div style={{ marginTop:16 }}>
                 <div style={{ fontSize:12, color:C.txS, fontWeight:500, marginBottom:4 }}>
                   {"📈 시계열 분석 — " + result.colName}
@@ -960,27 +1289,45 @@ export function MLTab({ allDs, apiKey }) {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+              </DownloadableChart>
             )}
           </div>
 
           <div style={{ border:"0.5px solid "+C.bd, borderRadius:"var(--border-radius-lg)", overflow:"hidden" }}>
             <div style={{ padding:"11px 14px", background:C.bgS, borderBottom:"0.5px solid "+C.bd,
-              display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
               <div>
                 <span style={{ fontSize:13, fontWeight:500, color:C.tx }}>✨ AI 결과 해석</span>
                 <div style={{ fontSize:11, color:C.txS, marginTop:2 }}>
-                  Gemini가 입문자도 이해하기 쉽게 설명해 드립니다
+                  성능 평가 · 피처 의미 · 다음 분석 제안까지 AI가 설명해 드립니다
                 </div>
               </div>
-              <Btn variant="primary" small onClick={askGemini} disabled={!apiKey || geminiLoading}>
-                {geminiLoading ? "분석 중..." : apiKey ? "✨ AI 해석 받기" : "EDA 탭에서 API 키 입력"}
+              <Btn variant="primary" small onClick={askAI} disabled={!orKey || aiLoading}>
+                {aiLoading ? "분석 중..." : orKey ? "✨ AI 해석 받기" : "AI 제안 단계에서 API 키 입력"}
               </Btn>
             </div>
             <div style={{ padding:"14px 18px" }}>
-              {geminiLoading && <div style={{ fontSize:13, color:C.txS }}>Gemini가 결과를 해석하고 있습니다...</div>}
-              {geminiText && <MdBlock text={geminiText}/>}
-              {!geminiLoading && !geminiText && (
-                <div style={{ fontSize:12, color:C.txT }}>위 버튼을 누르면 AI가 결과를 친절하게 설명해 드립니다.</div>
+              {aiLoading && <div style={{ fontSize:13, color:C.txS }}>AI가 결과를 해석하고 있습니다...</div>}
+              {aiText && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:16 }}>
+                  <div style={{ flex:"1 1 340px" }}>
+                    <MdBlock text={aiText}/>
+                  </div>
+                  {ds && aiSpecs?.filter(s => specValid(ds, s)).length > 0 && (
+                    <div style={{ flex:"1 1 300px" }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:C.txS, marginBottom:8,
+                        textTransform:"uppercase", letterSpacing:"0.05em" }}>📊 AI 추천 차트</div>
+                      {aiSpecs.filter(s => specValid(ds, s)).map((s, i) => (
+                        <ChartCard key={i} title={s.title || `${s.x || s.y} 차트`} desc={s.reason}>
+                          <SpecChart ds={ds} spec={s}/>
+                        </ChartCard>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!aiLoading && !aiText && (
+                <div style={{ fontSize:12, color:C.txT }}>위 버튼을 누르면 AI가 결과를 친절하게 설명하고 관련 차트를 추천합니다.</div>
               )}
             </div>
           </div>

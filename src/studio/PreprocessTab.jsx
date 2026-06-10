@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo } from "react";
 import { C, ALL_TYPES } from "../constants";
-import { buildColMeta } from "../utils/dataUtils";
+import { buildColMeta, downloadCSV } from "../utils/dataUtils";
 import { TypeBadge, Btn, Section, DataTable, DsSelector } from "./UI";
 
 export function PreprocessTab({datasets,onUpdate}) {
@@ -113,6 +113,7 @@ export function PreprocessTab({datasets,onUpdate}) {
         <input type="checkbox" checked={applyAll_} onChange={e=>setApplyAll_(e.target.checked)}/>
         전체 파일 공통 적용
       </label>
+      <Btn small onClick={()=>downloadCSV(ds)}>📥 현재 상태 CSV 다운로드</Btn>
     </div>
 
     {/* ① 시작 행 지정 */}

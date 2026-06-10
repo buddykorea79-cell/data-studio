@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { C, PALETTE } from "../constants";
 import { DsSelector } from "./UI";
+import { downloadChartPNG } from "./Charts";
 
 // ── 색상 팔레트 ───────────────────────────────────────────────────────────────
 export const CHART_PALETTES = {
@@ -20,13 +21,24 @@ function getNumCols(ds) { return ds.colMeta.filter(c => c.type === "number"); }
 function getCatCols(ds) { return ds.colMeta.filter(c => c.type === "category"); }
 function NoData() { return <div style={{ padding: 32, textAlign: "center", color: C.txT, fontSize: 13 }}>데이터 없음</div>; }
 function ChartCard({ title, subtitle, children }) {
+  const bodyRef = useRef(null);
   return (
     <div style={{ border: `0.5px solid ${C.bd}`, borderRadius: "var(--border-radius-lg)", overflow: "hidden", marginBottom: 14 }}>
-      <div style={{ padding: "10px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}` }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, color: C.txS, marginTop: 2 }}>{subtitle}</div>}
+      <div style={{ padding: "10px 14px", background: C.bgS, borderBottom: `0.5px solid ${C.bd}`,
+        display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.tx }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 11, color: C.txS, marginTop: 2 }}>{subtitle}</div>}
+        </div>
+        <button type="button" onClick={() => downloadChartPNG(bodyRef.current, title)}
+          title="차트를 PNG 이미지로 저장"
+          style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, cursor: "pointer",
+            background: C.bg, border: `0.5px solid ${C.bd}`, color: C.txS,
+            whiteSpace: "nowrap", flexShrink: 0 }}>
+          ⬇ PNG
+        </button>
       </div>
-      <div style={{ padding: "14px 14px 10px" }}>{children}</div>
+      <div ref={bodyRef} style={{ padding: "14px 14px 10px" }}>{children}</div>
     </div>
   );
 }
