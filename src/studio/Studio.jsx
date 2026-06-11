@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
-export const APP_VERSION = "v1.4.0";
-export const APP_BUILD   = "2026-06-10";
+export const APP_VERSION = "v1.5.0";
+export const APP_BUILD   = "2026-06-11";
 import { C } from "../constants";
 import { parseFile, makeDataset } from "../utils/dataUtils";
 import { FileCard }          from "./FileCard";
@@ -114,137 +114,185 @@ export default function DataStudioApp({ onBack = null }) {
     changeTab("files");
   }, [changeTab]);
 
-  const NAV_TABS = [
-    { id: "files",   label: "① 데이터 확인",  count: allDs.length },
-    { id: "info",    label: "② 데이터 정보",   disabled: !hasData },
-    { id: "prep",    label: "③ 전처리",        disabled: !hasData },
-    { id: "summary", label: "④ 요약·집계",    disabled: !hasData },
-    { id: "viz",     label: "⑤ 📊 차트",      disabled: !hasData },
-    { id: "eda",     label: "⑥ ✨ AI 분석",    disabled: !hasData },
-    { id: "db",      label: "⑦ 🗄️ SQL",        disabled: !hasData },
-    { id: "ml",      label: "⑧ 🤖 예측모델",   disabled: !hasData },
-    { id: "merge",   label: "파일 합치기" },
+  const NAV_STEPS = [
+    { id: "files",   num: "1", icon: "📁", label: "데이터 확인", count: allDs.length },
+    { id: "info",    num: "2", icon: "🔎", label: "데이터 정보", disabled: !hasData },
+    { id: "prep",    num: "3", icon: "🧹", label: "전처리",      disabled: !hasData },
+    { id: "summary", num: "4", icon: "Σ",  label: "요약·집계",  disabled: !hasData },
+    { id: "viz",     num: "5", icon: "📊", label: "차트",        disabled: !hasData },
+    { id: "eda",     num: "6", icon: "✨", label: "AI 분석",     disabled: !hasData },
+    { id: "db",      num: "7", icon: "🗄️", label: "SQL",         disabled: !hasData },
+    { id: "ml",      num: "8", icon: "🤖", label: "예측모델",    disabled: !hasData },
   ];
+  const NAV_TOOLS = [
+    { id: "merge", icon: "⊕", label: "파일 합치기" },
+  ];
+  const currentNav = [...NAV_STEPS, ...NAV_TOOLS].find(t => t.id === activeTab);
+
+  const NavItem = ({ t }) => (
+    <button
+      type="button"
+      className={"ds-nav-item" + (activeTab === t.id ? " active" : "")}
+      onClick={() => !t.disabled && changeTab(t.id)}
+      disabled={t.disabled}
+    >
+      <span style={{ width: 18, textAlign: "center", fontSize: 13, flexShrink: 0 }}>{t.icon}</span>
+      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {t.num && <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, marginRight: 6, opacity: 0.55 }}>{t.num}</span>}
+        {t.label}
+      </span>
+      {t.count !== undefined && t.count > 0 && (
+        <span style={{
+          fontSize: 11, padding: "0px 6px", borderRadius: 10, flexShrink: 0,
+          background: activeTab === t.id ? "var(--color-brand)" : C.bgT,
+          color: activeTab === t.id ? "#fff" : C.txS,
+          fontWeight: 600,
+        }}>{t.count}</span>
+      )}
+    </button>
+  );
 
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto", padding: "1.5rem 1rem", fontFamily: "var(--font-sans)" }}>
+    <div className="ds-shell" style={{ fontFamily: "var(--font-sans)" }}>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".csv,.xlsx,.xls"
+        onChange={e => { handleFiles(Array.from(e.target.files)); e.target.value = ""; }}
+        style={{ display: "none" }}
+      />
 
-      {/* 헤더 */}
-      <div style={{ marginBottom: 20 }}>
-        {onBack && (
-          <button
-            type="button"
-            onClick={e => { e.preventDefault(); e.stopPropagation(); onBack(); }}
-            style={{
-              fontSize: 12, fontWeight: 500, cursor: "pointer", marginBottom: 14,
-              background: "transparent", border: "1px solid var(--color-border-secondary)",
-              borderRadius: "var(--border-radius-md)", padding: "5px 12px",
-              color: "var(--color-text-secondary)", display: "flex", alignItems: "center", gap: 5,
-            }}
-          >
-            ← 메인으로
-          </button>
-        )}
-        <h1 style={{ fontSize: 22, fontWeight: 500, color: C.tx, margin: "0 0 4px" }}>📊 Data Studio</h1>
-        <p style={{ fontSize: 13, color: C.txS, margin: 0 }}>
-          CSV / Excel · Merge · Union · 전처리 · 요약 · 시각화 · EDA · ML/DL
-        </p>
-      </div>
+      {/* ── 사이드바 */}
+      <aside className="ds-sidebar">
+        <div className="ds-side-head" style={{
+          display: "flex", alignItems: "center", gap: 9,
+          padding: "16px 16px 12px", borderBottom: "1px solid " + C.bd,
+        }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+            background: "var(--color-brand)", color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 14, fontWeight: 700,
+          }}>D</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, lineHeight: 1.2 }}>Data Studio</div>
+            <div style={{ fontSize: 10, color: C.txT, fontFamily: "var(--font-mono)" }}>{APP_VERSION}</div>
+          </div>
+        </div>
 
-      {/* 업로드 영역 */}
+        <div className="ds-nav-group">분석 단계</div>
+        {NAV_STEPS.map(t => <NavItem key={t.id} t={t} />)}
+        <div className="ds-nav-group">도구</div>
+        {NAV_TOOLS.map(t => <NavItem key={t.id} t={t} />)}
+
+        <div className="ds-side-foot" style={{ marginTop: "auto", padding: "12px 8px 14px", borderTop: "1px solid " + C.bd }}>
+          {onBack && (
+            <button
+              type="button"
+              className="ds-nav-item"
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onBack(); }}
+            >
+              <span style={{ width: 18, textAlign: "center" }}>←</span>
+              <span>메인으로</span>
+            </button>
+          )}
+          <div className="ds-foot-meta" style={{ fontSize: 10, color: C.txT, padding: "8px 18px 0", lineHeight: 1.6 }}>
+            인코딩 자동 감지<br/>UTF-8 / EUC-KR · {APP_BUILD}
+          </div>
+        </div>
+      </aside>
+
+      {/* ── 메인 영역 */}
       <div
+        className="ds-main"
         onDrop={onDrop}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onClick={e => { e.stopPropagation(); inputRef.current?.click(); }}
-        style={{
-          border: "1.5px dashed " + (dragOver ? C.infoTx : C.bdS),
-          borderRadius: "var(--border-radius-lg)",
-          padding: "22px 20px", textAlign: "center", cursor: "pointer",
-          background: dragOver ? C.info : C.bgS,
-          transition: "all 0.15s", marginBottom: 18,
-        }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept=".csv,.xlsx,.xls"
-          onChange={e => { handleFiles(Array.from(e.target.files)); e.target.value = ""; }}
-          style={{ display: "none" }}
-        />
-        <div style={{ fontSize: 20, marginBottom: 6 }}>📂</div>
-        <div style={{ fontSize: 14, fontWeight: 500, color: C.tx, marginBottom: 3 }}>
-          파일을 드래그하거나 클릭하여 업로드
-        </div>
-        <div style={{ fontSize: 12, color: C.txS }}>
-          CSV · Excel (.xlsx, .xls) · 여러 파일 동시 가능
-        </div>
-      </div>
+        {/* 드래그 오버레이 */}
+        {dragOver && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 100, pointerEvents: "none",
+            background: "var(--color-brand-soft)",
+            border: "2px dashed var(--color-brand)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{
+              background: C.bg, borderRadius: "var(--border-radius-lg)",
+              padding: "18px 32px", boxShadow: "var(--shadow-md)",
+              fontSize: 15, fontWeight: 600, color: "var(--color-brand-strong)",
+            }}>
+              📂 파일을 놓아 업로드
+            </div>
+          </div>
+        )}
 
-      {!hasData && !loading && (
-        <div style={{ textAlign: "center", marginTop: -10, marginBottom: 14 }}>
+        {/* 상단 바 */}
+        <header className="ds-topbar">
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span>{currentNav?.icon}</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentNav?.label || "Data Studio"}</span>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {loading && <span style={{ fontSize: 12, color: C.txS }}>파일 분석 중...</span>}
+            {!hasData && !loading && (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); loadSampleData(); }}
+                style={{
+                  fontSize: 12, fontWeight: 500, cursor: "pointer", padding: "6px 12px",
+                  borderRadius: "var(--border-radius-md)", border: "1px solid " + C.bdS,
+                  background: "transparent", color: C.txS, whiteSpace: "nowrap",
+                }}
+              >
+                🎁 샘플 데이터
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); inputRef.current?.click(); }}
+              style={{
+                fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "6px 14px",
+                borderRadius: "var(--border-radius-md)", border: "none",
+                background: "var(--color-brand)", color: "#fff", whiteSpace: "nowrap",
+              }}
+            >
+              ⬆ 파일 업로드
+            </button>
+          </div>
+        </header>
+
+        <div className="ds-content">
+
+      {/* 빈 상태 */}
+      {!hasData && !loading && activeTab !== "merge" && (
+        <div
+          onClick={e => { e.stopPropagation(); inputRef.current?.click(); }}
+          style={{
+            textAlign: "center", padding: "72px 24px", cursor: "pointer",
+            border: "1.5px dashed " + C.bdS, borderRadius: "var(--border-radius-xl)",
+            background: C.bgS, transition: "all 0.15s",
+          }}
+        >
+          <div style={{ fontSize: 32, marginBottom: 14 }}>📂</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: C.tx, marginBottom: 6 }}>
+            파일을 드래그하거나 클릭하여 업로드
+          </div>
+          <div style={{ fontSize: 13, color: C.txS, marginBottom: 20 }}>
+            CSV · Excel (.xlsx, .xls) · 여러 파일 동시 가능
+          </div>
           <button
             type="button"
             onClick={e => { e.stopPropagation(); loadSampleData(); }}
             style={{
-              fontSize: 12, color: C.infoTx, background: "transparent", border: "none",
-              cursor: "pointer", padding: "4px 8px", textDecoration: "underline",
+              fontSize: 13, fontWeight: 500, color: "var(--color-brand-strong)",
+              background: "var(--color-brand-soft)", border: "none",
+              cursor: "pointer", padding: "8px 18px", borderRadius: "var(--border-radius-md)",
             }}
           >
             🎁 파일이 없으신가요? 샘플 데이터로 시작하기
           </button>
-        </div>
-      )}
-
-      {loading && (
-        <div style={{ textAlign: "center", padding: 14, color: C.txS, fontSize: 14 }}>
-          파일 분석 중...
-        </div>
-      )}
-
-      {/* 탭 네비게이션 */}
-      <div style={{
-        display: "flex", gap: 0, marginBottom: 18,
-        borderBottom: "0.5px solid " + C.bd, overflowX: "auto",
-      }}>
-        {NAV_TABS.map(t => (
-          <button
-            type="button"
-            key={t.id}
-            onClick={() => !t.disabled && changeTab(t.id)}
-            disabled={t.disabled}
-            style={{
-              fontSize: 13, padding: "9px 12px",
-              cursor: t.disabled ? "not-allowed" : "pointer",
-              background: "transparent", border: "none",
-              borderBottom: activeTab === t.id ? "2px solid " + C.infoTx : "2px solid transparent",
-              color: t.disabled ? C.txT : activeTab === t.id ? C.infoTx : C.txS,
-              fontWeight: activeTab === t.id ? 500 : 400,
-              display: "flex", alignItems: "center", gap: 5,
-              marginBottom: -0.5, opacity: t.disabled ? 0.4 : 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {t.label}
-            {t.count !== undefined && t.count > 0 && (
-              <span style={{
-                fontSize: 11, padding: "1px 6px", borderRadius: 10,
-                background: activeTab === t.id ? C.info : C.bgS,
-                color: activeTab === t.id ? C.infoTx : C.txS,
-              }}>{t.count}</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* 빈 상태 */}
-      {!hasData && !loading && activeTab !== "merge" && (
-        <div style={{
-          textAlign: "center", padding: "48px 24px", color: C.txT, fontSize: 14,
-          border: "0.5px solid " + C.bd, borderRadius: "var(--border-radius-lg)",
-        }}>
-          파일을 업로드해 주세요.
         </div>
       )}
 
@@ -285,6 +333,18 @@ export default function DataStudioApp({ onBack = null }) {
       )}
 
       {/* 파일 목록 */}
+      {activeTab === "files" && hasData && (
+        <div
+          onClick={e => { e.stopPropagation(); inputRef.current?.click(); }}
+          style={{
+            border: "1px dashed " + C.bdS, borderRadius: "var(--border-radius-lg)",
+            padding: "10px 16px", textAlign: "center", cursor: "pointer",
+            fontSize: 12, color: C.txS, background: C.bgS, marginBottom: 14,
+          }}
+        >
+          ⊕ 파일 추가 — 드래그하거나 클릭하여 업로드
+        </div>
+      )}
       {activeTab === "files" && allDs.map(ds => (
         <FileCard
           key={ds.id}
@@ -305,23 +365,7 @@ export default function DataStudioApp({ onBack = null }) {
       {activeTab === "eda"     && hasData && <EDATab  allDs={allDs} summaryResults={summaryResults} />}
       {activeTab === "ml"      && hasData && <MLTab   allDs={allDs} apiKey={sessionStorage.getItem("openrouter_key") || ""} />}
 
-      {/* 버전 정보 */}
-      <div style={{
-        marginTop: 32, paddingTop: 12,
-        borderTop: "0.5px solid " + C.bd,
-        display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10,
-      }}>
-        <span style={{ fontSize: 11, color: C.txT, fontFamily: "var(--font-mono)" }}>
-          Data Studio {APP_VERSION}
-        </span>
-        <span style={{ fontSize: 10, color: C.txT }}>·</span>
-        <span style={{ fontSize: 11, color: C.txT }}>
-          인코딩 자동 감지 (UTF-8 / EUC-KR)
-        </span>
-        <span style={{ fontSize: 10, color: C.txT }}>·</span>
-        <span style={{ fontSize: 11, color: C.txT, fontFamily: "var(--font-mono)" }}>
-          {APP_BUILD}
-        </span>
+        </div>
       </div>
     </div>
   );

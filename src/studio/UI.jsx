@@ -29,11 +29,11 @@ export function StatCard({ label, value }) {
 
 export function Btn({ onClick, children, variant="default", disabled=false, small=false, full=false }) {
   const S = {
-    default: { bg:C.bgS,     color:C.tx,          border:"1.5px solid "+C.bdS },
-    primary: { bg:"#2E4D3D", color:"#FAFAF7",      border:"none" },
-    success: { bg:"#2D7A4F", color:"#FAFAF7",      border:"none" },
-    danger:  { bg:"transparent", color:"#C44545",  border:"1.5px solid #C44545" },
-    warn:    { bg:"#B8862C", color:"#FAFAF7",      border:"none" },
+    default: { bg:C.bg,      color:C.tx,           border:"1px solid "+C.bdS },
+    primary: { bg:"var(--color-brand)", color:"#fff", border:"none" },
+    success: { bg:"#30A46C", color:"#fff",          border:"none" },
+    danger:  { bg:"transparent", color:"#CC3D3D",   border:"1px solid #CC3D3D" },
+    warn:    { bg:"#B07816", color:"#fff",          border:"none" },
   };
   const s = S[variant] || S.default;
   return (
