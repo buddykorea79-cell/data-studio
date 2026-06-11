@@ -1,7 +1,132 @@
 import { useState } from "react";
 import { C } from "../constants";
 import { Btn } from "./UI";
-import { performJoin, performUnion } from "../utils/dataUtils";
+import { performJoin, performUnion, reheaderDataset } from "../utils/dataUtils";
+
+// ── 데이터 시작 행 공통 지정 패널 ─────────────────────────────────────────────
+// 제목·메타 행이 위에 있는 파일들의 실제 헤더(컬럼명) 행을 지정해 재파싱
+export function StartRowPanel({ datasets, onUpdate }) {
+  const adjustable = datasets.filter(d => d.rawGrid);
+  const [open, setOpen] = useState(false);
+  const [headerRow, setHeaderRow] = useState(() => adjustable[0]?.headerRow || 1);
+  const [previewId, setPreviewId] = useState(() => adjustable[0]?.id || "");
+  const [applied, setApplied] = useState("");
+
+  if (!adjustable.length) return null;
+  const previewDs = adjustable.find(d => d.id === previewId) || adjustable[0];
+  const grid = previewDs.rawGrid || [];
+  const previewRows = grid.slice(0, 8);
+  const maxCols = Math.min(8, Math.max(...previewRows.map(r => r.length), 1));
+
+  const applyAll = () => {
+    const n = Math.max(1, Math.min(headerRow, 50));
+    adjustable.forEach(d => {
+      if (d.headerRow !== n) onUpdate(reheaderDataset(d, n));
+    });
+    setApplied(`${adjustable.length}개 파일에 적용됨 — ${n}행을 컬럼명으로, ${n + 1}행부터 데이터로 읽습니다.`);
+  };
+
+  return (
+    <div style={{ border:`0.5px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)", overflow:"hidden", marginBottom:14 }}>
+      <div onClick={() => setOpen(p => !p)} style={{ padding:"12px 16px", background:C.bgS,
+        borderBottom: open ? `0.5px solid ${C.bd}` : "none",
+        display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+        <span style={{ fontSize:11, padding:"2px 8px", borderRadius:4, background:C.warn, color:C.warnTx, fontWeight:500 }}>시작 행</span>
+        <span style={{ fontSize:14, fontWeight:500, color:C.tx }}>데이터 시작 행 지정</span>
+        <span style={{ fontSize:12, color:C.txS }}>— 제목·설명 행이 위에 있는 파일용 (모든 파일 공통 적용)</span>
+        <span style={{ marginLeft:"auto", fontSize:12, color:C.txS }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div style={{ padding:16 }}>
+          <div style={{ fontSize:12, color:C.txS, lineHeight:1.7, marginBottom:12 }}>
+            엑셀 보고서처럼 위쪽에 제목이나 설명 행이 있는 파일은 컬럼명이 잘못 잡힙니다.<br/>
+            아래 미리보기에서 <strong>실제 컬럼명이 있는 행을 클릭</strong>하면 그 행을 헤더로, 다음 행부터를 데이터로 다시 읽습니다.
+          </div>
+
+          {/* 미리볼 파일 선택 */}
+          {adjustable.length > 1 && (
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+              {adjustable.map(d => (
+                <span key={d.id} onClick={() => setPreviewId(d.id)} style={{
+                  fontSize:11, padding:"4px 10px", borderRadius:14, cursor:"pointer",
+                  background: previewDs.id === d.id ? C.info : C.bgS,
+                  color: previewDs.id === d.id ? C.infoTx : C.txS,
+                  border: `1px solid ${previewDs.id === d.id ? C.infoTx + "66" : C.bd}`,
+                }}>
+                  {d.name}{d.headerRow > 1 ? ` (${d.headerRow}행~)` : ""}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* 원본 미리보기 — 행 클릭으로 헤더 선택 */}
+          <div style={{ border:`0.5px solid ${C.bd}`, borderRadius:"var(--border-radius-md)", overflow:"auto", marginBottom:12 }}>
+            <table style={{ borderCollapse:"collapse", fontSize:12, width:"100%" }}>
+              <tbody>
+                {previewRows.map((row, ri) => {
+                  const rowNum = ri + 1;
+                  const isHeader = rowNum === headerRow;
+                  const isData = rowNum > headerRow;
+                  return (
+                    <tr key={ri} onClick={() => setHeaderRow(rowNum)} style={{
+                      cursor:"pointer",
+                      background: isHeader ? C.info : isData ? C.bg : C.bgT,
+                      opacity: rowNum < headerRow ? 0.45 : 1,
+                    }}>
+                      <td style={{ padding:"5px 10px", fontFamily:"var(--font-mono)", fontSize:11,
+                        color: isHeader ? C.infoTx : C.txT, fontWeight: isHeader ? 700 : 400,
+                        borderBottom:`0.5px solid ${C.bd}`, whiteSpace:"nowrap",
+                        borderRight:`0.5px solid ${C.bd}`, position:"sticky", left:0,
+                        background: isHeader ? C.info : isData ? C.bg : C.bgT }}>
+                        {rowNum}행{isHeader ? " ✓ 헤더" : ""}
+                      </td>
+                      {Array.from({ length: maxCols }, (_, ci) => (
+                        <td key={ci} style={{ padding:"5px 10px",
+                          color: isHeader ? C.infoTx : C.tx,
+                          fontWeight: isHeader ? 600 : 400,
+                          borderBottom:`0.5px solid ${C.bd}`, whiteSpace:"nowrap",
+                          maxWidth:140, overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {String(row[ci] ?? "")}
+                        </td>
+                      ))}
+                      {row.length > maxCols && (
+                        <td style={{ padding:"5px 10px", color:C.txT, fontSize:11, borderBottom:`0.5px solid ${C.bd}` }}>
+                          +{row.length - maxCols}열
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <label style={{ fontSize:12, color:C.txS, display:"flex", alignItems:"center", gap:6 }}>
+              헤더(컬럼명) 행:
+              <input type="number" min={1} max={50} value={headerRow}
+                onChange={e => setHeaderRow(Math.max(1, +e.target.value || 1))}
+                style={{ width:64, fontSize:13, padding:"5px 8px", borderRadius:"var(--border-radius-md)",
+                  border:`0.5px solid ${C.bdS}`, background:C.bg, color:C.tx, fontFamily:"var(--font-mono)" }}/>
+            </label>
+            <span style={{ fontSize:12, color:C.txS }}>
+              → 데이터는 <strong style={{ color:C.tx }}>{headerRow + 1}행</strong>부터
+            </span>
+            <Btn variant="primary" small onClick={applyAll}>
+              모든 파일({adjustable.length}개)에 공통 적용
+            </Btn>
+          </div>
+          {applied && (
+            <div style={{ marginTop:10, fontSize:12, color:C.successTx, background:C.success,
+              padding:"7px 10px", borderRadius:"var(--border-radius-md)" }}>
+              ✓ {applied}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function MergePanel({ datasets, onResult }) {
   const [lIdx, setLIdx] = useState(0);

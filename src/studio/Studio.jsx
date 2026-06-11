@@ -5,7 +5,7 @@ export const APP_BUILD   = "2026-06-11";
 import { C } from "../constants";
 import { parseFile, makeDataset } from "../utils/dataUtils";
 import { FileCard }          from "./FileCard";
-import { MergePanel, UnionPanel } from "./MergeUnion";
+import { MergePanel, UnionPanel, StartRowPanel } from "./MergeUnion";
 import { DataInfoTab }       from "./DataInfoTab";
 import { SummaryTab }        from "./SummaryTab";
 import { PreprocessTab }     from "./PreprocessTab";
@@ -299,6 +299,12 @@ export default function DataStudioApp({ onBack = null }) {
       {/* Merge / Union */}
       {activeTab === "merge" && (
         <div>
+          {datasets.length >= 1 && (
+            <StartRowPanel
+              datasets={datasets}
+              onUpdate={d => setDatasets(p => p.map(x => x.id === d.id ? d : x))}
+            />
+          )}
           {datasets.length === 0 && (
             <div style={{
               textAlign: "center", padding: "32px", color: C.txT, fontSize: 13,

@@ -96,6 +96,35 @@ function parseCsvText(text) {
   return rows.filter(r => r.some(c => c !== ""));
 }
 
+// ── Grid → Dataset (헤더 행 지정 가능) ────────────────────────────────────────
+// grid: 2차원 배열, headerRow: 1부터 시작하는 헤더 행 번호 (데이터는 그 다음 행부터)
+export function makeGridDataset(id, name, grid, headerRow = 1) {
+  if (!grid.length || headerRow < 1 || headerRow > grid.length) {
+    return makeDataset(id, name, [], { rawGrid: grid, headerRow });
+  }
+  const width = Math.max(...grid.slice(0, headerRow + 5).map(r => r.length));
+  const rawNames = grid[headerRow - 1] || [];
+  const seen = {};
+  const headers = Array.from({ length: Math.max(width, rawNames.length) }, (_, i) => {
+    let n = String(rawNames[i] ?? "").trim();
+    if (!n) n = `열${i + 1}`;
+    seen[n] = (seen[n] || 0) + 1;
+    return seen[n] > 1 ? `${n}_${seen[n]}` : n;
+  });
+  const rows = grid.slice(headerRow).map(vals => {
+    const o = {};
+    headers.forEach((h, i) => { o[h] = vals[i] ?? ""; });
+    return o;
+  });
+  return makeDataset(id, name, rows, { rawGrid: grid, headerRow });
+}
+
+// 이미 파싱된 데이터셋의 헤더 행을 변경 (rawGrid 보유 시에만)
+export function reheaderDataset(ds, headerRow) {
+  if (!ds.rawGrid) return ds;
+  return makeGridDataset(ds.id, ds.name, ds.rawGrid, headerRow);
+}
+
 // ── File parsing ──────────────────────────────────────────────────────────────
 export function parseFile(file) {
   return new Promise((resolve, reject) => {
@@ -103,28 +132,15 @@ export function parseFile(file) {
     const ext = file.name.split(".").pop().toLowerCase();
     reader.onload = e => {
       try {
-        let rows = [];
+        let grid;
         if (ext === "csv") {
           const text = decodeCsvBuffer(e.target.result);
-          const parsed = parseCsvText(text);
-          if (!parsed.length) { resolve(makeDataset(crypto.randomUUID(), file.name, [])); return; }
-          const headers = parsed[0].map(h => String(h).trim());
-          rows = parsed.slice(1).map(vals => {
-            const row = {};
-            headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
-            return row;
-          });
+          grid = parseCsvText(text);
         } else {
           const wb = XLSX.read(e.target.result, { type: "array" });
-          const arr = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", header: 1 });
-          const headers = arr[0].map(String);
-          rows = arr.slice(1).map(row => {
-            const obj = {};
-            headers.forEach((h, i) => { obj[h] = row[i] ?? ""; });
-            return obj;
-          });
+          grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", header: 1 });
         }
-        resolve(makeDataset(crypto.randomUUID(), file.name, rows));
+        resolve(makeGridDataset(crypto.randomUUID(), file.name, grid, 1));
       } catch (err) { reject(err); }
     };
     reader.onerror = () => reject(new Error("파일 읽기 실패"));
