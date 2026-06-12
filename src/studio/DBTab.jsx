@@ -234,8 +234,11 @@ export function DBTab({ allDs, onAddDataset }) {
   const [model,    setModel]          = useState(MODELS[0].id);
   const [query,    setQuery]          = useState("");
   const [editSQL,  setEditSQL]        = useState("");
+  const [directSQL,setDirectSQL]      = useState("");
+  const [showDirect,setShowDirect]    = useState(false);
   const [results,  setResults]        = useState(null);
   const [resultDs, setResultDs]       = useState(null);
+  const [savedMsg, setSavedMsg]       = useState("");
   const [history,  setHistory]        = useState([]);
   const [loading,  setLoading]        = useState(false);
   const [error,    setError]          = useState("");
@@ -365,11 +368,10 @@ ${schema}`;
   };
 
   // ── Execute SQL ──────────────────────────────────────────────────────────────
-  const execSQL = () => {
-    const db  = dbRef.current;
-    const sql = editSQL.trim();
-    if (!db || !sql) return;
-    setError(""); setAiResult(""); setAiError("");
+  const runSQL = (sql) => {
+    const db = dbRef.current;
+    if (!db || !sql?.trim()) return;
+    setError(""); setAiResult(""); setAiError(""); setSavedMsg("");
     try {
       const res = db.exec(sql);
       if (!res.length) {
@@ -390,6 +392,7 @@ ${schema}`;
       setResultDs(null);
     }
   };
+  const execSQL = () => runSQL(editSQL.trim());
 
   // ── AI interpretation ────────────────────────────────────────────────────────
   const interpretResult = async () => {
@@ -641,6 +644,36 @@ ${sampleRows}
             </div>
           </div>
 
+          {/* SQL 직접 입력 */}
+          <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)",
+            overflow:"hidden", marginBottom:14 }}>
+            <div
+              onClick={() => setShowDirect(p => !p)}
+              style={{ padding:"10px 16px", background:C.bgS, borderBottom: showDirect ? `1px solid ${C.bd}` : "none",
+                display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+              <span style={{ fontSize:12, fontWeight:600, color:C.tx }}>⌨️ SQL 직접 입력 (AI 없이 실행)</span>
+              <span style={{ fontSize:11, color:C.txS }}>{showDirect ? "▲ 접기" : "▼ 펼치기"}</span>
+            </div>
+            {showDirect && (
+              <div style={{ padding:12 }}>
+                <textarea rows={5} value={directSQL} onChange={e => setDirectSQL(e.target.value)}
+                  placeholder={"SELECT * FROM 테이블명 LIMIT 100\nSELECT 컬럼, COUNT(*) FROM 테이블명 GROUP BY 컬럼"}
+                  style={{ ...inpStyle(), fontFamily:"var(--font-mono)", fontSize:12,
+                    background:"var(--color-primary-900)", color:"var(--color-primary-300)",
+                    lineHeight:1.7, resize:"vertical", marginBottom:8 }} />
+                <Btn variant="success" onClick={() => { if (directSQL.trim()) runSQL(directSQL.trim()); }}
+                  disabled={!directSQL.trim() || !tables.length}>
+                  ▶ 실행
+                </Btn>
+                {tables.length === 0 && (
+                  <span style={{ fontSize:11, color:C.warnTx, marginLeft:10 }}>
+                    ⚠️ 먼저 데이터를 가져와야 합니다
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Generated SQL editor */}
           {editSQL && (
             <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)",
@@ -663,40 +696,95 @@ ${sampleRows}
           {results && (
             <div style={{ border:`1px solid ${C.bd}`, borderRadius:"var(--border-radius-lg)",
               overflow:"hidden", marginBottom:14 }}>
+              {/* 결과 헤더 */}
               <div style={{ padding:"10px 16px", background:"#E3F1E8", borderBottom:`1px solid ${C.bd}`,
                 display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
                 <span style={{ fontSize:12, fontWeight:600, color:"var(--color-text-success)" }}>
                   ✅ 결과 — {results.rows.length.toLocaleString()}행 × {results.columns.length}열
                 </span>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  {resultDs && (
-                    <Btn small onClick={saveResultAsTable}>
-                      🗄️ 테이블로 저장 (재쿼리)
-                    </Btn>
-                  )}
-                  {onAddDataset && resultDs && (
-                    <Btn small variant="success" onClick={() => {
-                      const name = `sql_${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).replace(/:/g,"")}`;
-                      onAddDataset({ ...resultDs, id: crypto.randomUUID(), name });
-                    }}>
-                      📥 새 데이터로 저장
-                    </Btn>
-                  )}
-                  {resultDs && (
-                    <Btn small onClick={() => downloadCSV(resultDs)}>
-                      ⬇ CSV
-                    </Btn>
-                  )}
-                  {apiKey && (
-                    <Btn small variant="primary" onClick={interpretResult} disabled={aiLoading}>
-                      {aiLoading ? "AI 분석 중…" : "🤖 AI 해석"}
-                    </Btn>
-                  )}
-                </div>
+                {apiKey && (
+                  <Btn small variant="primary" onClick={interpretResult} disabled={aiLoading}>
+                    {aiLoading ? "AI 분석 중…" : "🤖 AI 해석"}
+                  </Btn>
+                )}
               </div>
+              {/* 데이터 테이블 */}
               <div style={{ padding:12 }}>
-                <DataTable rows={results.rows} columns={results.columns} maxH={400} />
+                <DataTable rows={results.rows} columns={results.columns} maxH={360} />
               </div>
+              {/* 저장 액션 패널 */}
+              {resultDs && (
+                <div style={{
+                  borderTop:`2px solid var(--color-brand)`,
+                  background:"linear-gradient(90deg, #E6F7F0 0%, #F4FAF7 100%)",
+                  padding:"14px 16px",
+                }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:"var(--color-brand-strong)",
+                    marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                    <span>💾</span> 결과 저장 / 재활용
+                  </div>
+                  {savedMsg && (
+                    <div style={{ fontSize:12, color:"var(--color-brand-strong)", background:"var(--color-brand-soft)",
+                      padding:"6px 12px", borderRadius:"var(--border-radius-md)",
+                      border:"1px solid var(--color-brand)", marginBottom:10 }}>
+                      {savedMsg}
+                    </div>
+                  )}
+                  <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                    {/* 새 데이터로 저장 */}
+                    {onAddDataset && (
+                      <button type="button"
+                        onClick={() => {
+                          const ts = new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).replace(/:/g,"");
+                          const name = `sql_결과_${ts}`;
+                          onAddDataset({ ...resultDs, id: crypto.randomUUID(), name });
+                          setSavedMsg(`✅ "${name}" 데이터셋으로 저장됨 — 전처리·차트·ML 탭에서 활용 가능`);
+                        }}
+                        style={{
+                          display:"flex", alignItems:"center", gap:8, cursor:"pointer",
+                          padding:"10px 18px", borderRadius:"var(--border-radius-md)",
+                          background:"var(--color-brand)", color:"#fff",
+                          border:"none", fontSize:13, fontWeight:600,
+                          boxShadow:"0 2px 8px rgba(36,180,126,0.35)",
+                        }}>
+                        <span style={{ fontSize:16 }}>📥</span>
+                        <span>새 데이터로 저장<br/><span style={{ fontSize:10, fontWeight:400, opacity:0.9 }}>전처리·차트·요약·ML에서 재사용</span></span>
+                      </button>
+                    )}
+                    {/* SQLite 테이블로 저장 */}
+                    <button type="button"
+                      onClick={() => {
+                        try {
+                          saveResultAsTable();
+                          setSavedMsg(`✅ 새 SQLite 테이블로 저장됨 — 이 결과 위에서 다시 쿼리 가능`);
+                        } catch(e) { setError(e.message); }
+                      }}
+                      style={{
+                        display:"flex", alignItems:"center", gap:8, cursor:"pointer",
+                        padding:"10px 18px", borderRadius:"var(--border-radius-md)",
+                        background:"#185FA5", color:"#fff",
+                        border:"none", fontSize:13, fontWeight:600,
+                        boxShadow:"0 2px 8px rgba(24,95,165,0.25)",
+                      }}>
+                      <span style={{ fontSize:16 }}>🗄️</span>
+                      <span>테이블로 저장<br/><span style={{ fontSize:10, fontWeight:400, opacity:0.9 }}>결과에 SQL 재실행 가능</span></span>
+                    </button>
+                    {/* CSV 다운로드 */}
+                    <button type="button"
+                      onClick={() => { downloadCSV(resultDs); setSavedMsg("✅ CSV 파일 다운로드 시작"); }}
+                      style={{
+                        display:"flex", alignItems:"center", gap:8, cursor:"pointer",
+                        padding:"10px 18px", borderRadius:"var(--border-radius-md)",
+                        background:"#fff", color:C.tx,
+                        border:`1.5px solid ${C.bdS}`, fontSize:13, fontWeight:600,
+                        boxShadow:"var(--shadow-sm)",
+                      }}>
+                      <span style={{ fontSize:16 }}>⬇️</span>
+                      <span>CSV 다운로드<br/><span style={{ fontSize:10, fontWeight:400, color:C.txS }}>로컬 파일로 저장</span></span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
