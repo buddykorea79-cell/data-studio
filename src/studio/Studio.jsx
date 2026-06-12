@@ -326,13 +326,13 @@ export default function DataStudioApp({ onBack = null }) {
             </div>
           )}
           {datasets.length >= 2 && (
-            <MergePanel datasets={datasets} onResult={r => {
-              setDatasets(p => [...p, r]); changeTab("files");
+            <MergePanel datasets={datasets} onResult={(r, removeIds = []) => {
+              setDatasets(p => [...p.filter(d => !removeIds.includes(d.id)), r]); changeTab("files");
             }} />
           )}
           {datasets.length >= 2 && (
-            <UnionPanel datasets={datasets} onResult={r => {
-              setDatasets(p => [...p, r]); changeTab("files");
+            <UnionPanel datasets={datasets} onResult={(r, removeIds = []) => {
+              setDatasets(p => [...p.filter(d => !removeIds.includes(d.id)), r]); changeTab("files");
             }} />
           )}
         </div>

@@ -10,6 +10,9 @@ export function PreprocessTab({datasets,onUpdate}) {
   const [strOps,setStrOps]=useState({}); const [dedupCols,setDedupCols]=useState([]);
   const [dropCols,setDropCols]=useState([]); const [log,setLog]=useState([]);
   const [applyAll_,setApplyAll_]=useState(false);
+  const [newColName,setNewColName]=useState(""); const [newColMode,setNewColMode]=useState("const");
+  const [newColVal,setNewColVal]=useState("");
+  const [calcA,setCalcA]=useState(""); const [calcOp,setCalcOp]=useState("+"); const [calcB,setCalcB]=useState("");
 
   const ds=datasets.find(d=>d.id===selId);
   const prevId=useRef(selId);
@@ -102,6 +105,32 @@ export function PreprocessTab({datasets,onUpdate}) {
     });
     addLog([`컬럼 삭제: ${dropCols.join(",")}`]);
   };
+  const applyNewCol=(targets)=>{
+    const name=newColName.trim();
+    if(!name)return alert("추가할 컬럼명을 입력해 주세요.");
+    if(newColMode==="calc"&&(!calcA||!calcB))return alert("계산에 사용할 두 컬럼을 선택해 주세요.");
+    targets.forEach(d=>{
+      if(d.columns.includes(name)){addLog([`${d.name}: "${name}" 컬럼이 이미 존재해 건너뜀`]);return;}
+      const rows=d.rows.map((r,i)=>{
+        let v;
+        if(newColMode==="rownum")v=i+1;
+        else if(newColMode==="calc"){
+          const a=parseFloat(r[calcA]),b=parseFloat(r[calcB]);
+          if(isNaN(a)||isNaN(b))v=null;
+          else if(calcOp==="+")v=+(a+b).toFixed(6);
+          else if(calcOp==="-")v=+(a-b).toFixed(6);
+          else if(calcOp==="*")v=+(a*b).toFixed(6);
+          else v=b!==0?+(a/b).toFixed(6):null;
+        }
+        else v=newColVal;
+        return {...r,[name]:v};
+      });
+      const cols=[...d.columns,name];
+      onUpdate({...d,rows,columns:cols,colMeta:buildColMeta(rows,cols),rowCount:rows.length});
+      addLog([`${d.name}: 새 컬럼 "${name}" 추가 (${newColMode==="const"?`고정값 ${newColVal||"(빈값)"}`:newColMode==="rownum"?"행 번호":`${calcA} ${calcOp} ${calcB}`})`]);
+    });
+    setNewColName("");setNewColVal("");
+  };
   const addLog=ops=>setLog(p=>[...p,...ops.map(o=>({ts:new Date().toLocaleTimeString(),msg:o}))]);
   const getTargets=()=>applyAll_?datasets:[ds];
   const FILL_OPT=[{id:"none",label:"그대로"},{id:"mean",label:"평균"},{id:"median",label:"중앙"},{id:"mode",label:"최빈"},{id:"custom",label:"직접입력"}];
@@ -140,28 +169,66 @@ export function PreprocessTab({datasets,onUpdate}) {
       <Btn variant="primary" onClick={()=>applyTypeRename(getTargets())} small>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn>
     </Section>
 
-    {/* ④ null 치환 */}
-    <Section title="④ 특정 값 → null 치환" desc="쉼표로 여러 값 입력">
+    {/* ④ 새 컬럼 추가 */}
+    <Section title="④ 새 컬럼 추가" desc="고정값, 행 번호, 또는 두 숫자 컬럼의 계산식으로 새 컬럼을 만듭니다">
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:10}}>
+        <input placeholder="새 컬럼명" value={newColName} onChange={e=>setNewColName(e.target.value)}
+          style={{fontSize:13,padding:"6px 10px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx,width:160,fontFamily:"var(--font-mono)"}}/>
+        <div style={{display:"flex",gap:4}}>
+          {[{id:"const",label:"고정값"},{id:"rownum",label:"행 번호"},{id:"calc",label:"계산식"}].map(m=>(
+            <span key={m.id} onClick={()=>setNewColMode(m.id)} style={{fontSize:12,padding:"5px 12px",borderRadius:14,cursor:"pointer",
+              background:newColMode===m.id?C.info:C.bg,color:newColMode===m.id?C.infoTx:C.txS,
+              border:`0.5px solid ${newColMode===m.id?C.infoTx:C.bd}`,fontWeight:newColMode===m.id?500:400}}>{m.label}</span>
+          ))}
+        </div>
+        {newColMode==="const"&&(
+          <input placeholder="모든 행에 넣을 값" value={newColVal} onChange={e=>setNewColVal(e.target.value)}
+            style={{fontSize:13,padding:"6px 10px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx,width:160}}/>
+        )}
+        {newColMode==="rownum"&&(
+          <span style={{fontSize:12,color:C.txS}}>1, 2, 3… 순번이 들어갑니다</span>
+        )}
+        {newColMode==="calc"&&(
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <select value={calcA} onChange={e=>setCalcA(e.target.value)} style={{fontSize:12,padding:"5px 8px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx}}>
+              <option value="">컬럼 A</option>
+              {ds.colMeta.filter(c=>c.type==="number").map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+            <select value={calcOp} onChange={e=>setCalcOp(e.target.value)} style={{fontSize:13,padding:"5px 8px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx,fontFamily:"var(--font-mono)"}}>
+              {["+","-","*","/"].map(o=><option key={o} value={o}>{o}</option>)}
+            </select>
+            <select value={calcB} onChange={e=>setCalcB(e.target.value)} style={{fontSize:12,padding:"5px 8px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx}}>
+              <option value="">컬럼 B</option>
+              {ds.colMeta.filter(c=>c.type==="number").map(c=><option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+      <Btn variant="primary" onClick={()=>applyNewCol(getTargets())} small disabled={!newColName.trim()}>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn>
+    </Section>
+
+    {/* ⑤ null 치환 */}
+    <Section title="⑤ 특정 값 → null 치환" desc="쉼표로 여러 값 입력">
       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>{ds.colMeta.filter(c=>!dropCols.includes(c.name)).map(col=>{const ov=colOvr[col.name]||{};return <div key={col.name} style={{display:"grid",gridTemplateColumns:"160px 1fr",gap:10,alignItems:"center",padding:"7px 10px",background:C.bgS,borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bd}`}}><span style={{fontSize:12,fontWeight:500,color:C.tx,fontFamily:"var(--font-mono)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{col.name}</span><input placeholder="예: N/A, -, 없음" value={ov._nullInput??""} onChange={e=>{ovr(col.name,"_nullInput",e.target.value);ovr(col.name,"nullValues",e.target.value.split(",").map(v=>v.trim()).filter(Boolean));}} style={{fontSize:12,padding:"4px 8px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx}}/></div>;})}
       </div>
       <Btn variant="primary" onClick={()=>applyNullReplace(getTargets())} small>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn>
     </Section>
 
-    {/* ⑤ 결측값 처리 */}
-    <Section title="⑤ 결측값 처리">
+    {/* ⑥ 결측값 처리 */}
+    <Section title="⑥ 결측값 처리">
       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>{ds.colMeta.filter(c=>!dropCols.includes(c.name)).map(col=>{const st=fillSt[col.name]||"none";return <div key={col.name} style={{padding:"8px 10px",background:C.bgS,borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bd}`}}><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontSize:12,fontWeight:500,color:C.tx,fontFamily:"var(--font-mono)",minWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{col.name}</span><span style={{fontSize:11,color:col.stats.nullCount>0?"#A32D2D":C.txT,background:col.stats.nullCount>0?"#FCEBEB":C.bgT,padding:"2px 6px",borderRadius:4}}>결측 {col.stats.nullCount}개</span><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{FILL_OPT.filter(o=>col.type==="number"||!["mean","median"].includes(o.id)).map(o=><span key={o.id} onClick={()=>setFillSt(p=>({...p,[col.name]:o.id}))} style={{fontSize:11,padding:"3px 8px",borderRadius:10,cursor:"pointer",background:st===o.id?C.info:C.bg,color:st===o.id?C.infoTx:C.txS,border:`0.5px solid ${st===o.id?C.infoTx:C.bd}`,fontWeight:st===o.id?500:400}}>{o.label}</span>)}</div></div>{st==="custom"&&<input placeholder="채울 값" value={fillCus[col.name]||""} onChange={e=>setFillCus(p=>({...p,[col.name]:e.target.value}))} style={{marginTop:6,width:"100%",fontSize:12,padding:"4px 8px",borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bdS}`,background:C.bg,color:C.tx,boxSizing:"border-box"}}/>}</div>;})}
       </div>
       <Btn variant="primary" onClick={()=>applyFill(getTargets())} small>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn>
     </Section>
 
-    {/* ⑥ 문자열 정제 */}
-    <Section title="⑥ 문자열 정제">
+    {/* ⑦ 문자열 정제 */}
+    <Section title="⑦ 문자열 정제">
       {ds.colMeta.filter(c=>["text","category"].includes(c.type)&&!dropCols.includes(c.name)).length===0?<div style={{fontSize:13,color:C.txT}}>텍스트/범주형 컬럼이 없습니다.</div>:<><div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>{ds.colMeta.filter(c=>["text","category"].includes(c.type)&&!dropCols.includes(c.name)).map(col=>{const ops=strOps[col.name]||[];return <div key={col.name} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:C.bgS,borderRadius:"var(--border-radius-md)",border:`0.5px solid ${C.bd}`}}><span style={{fontSize:12,fontWeight:500,color:C.tx,fontFamily:"var(--font-mono)",minWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{col.name}</span>{[{id:"trim",label:"공백제거"},{id:"lower",label:"소문자"},{id:"upper",label:"대문자"}].map(op=><span key={op.id} onClick={()=>toggleStr(col.name,op.id)} style={{fontSize:11,padding:"3px 8px",borderRadius:10,cursor:"pointer",background:ops.includes(op.id)?C.success:C.bg,color:ops.includes(op.id)?C.successTx:C.txS,border:`0.5px solid ${ops.includes(op.id)?C.successTx:C.bd}`,fontWeight:ops.includes(op.id)?500:400}}>{op.label}</span>)}</div>;})}
       </div><Btn variant="primary" onClick={()=>applyStrOps(getTargets())} small>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn></>}
     </Section>
 
-    {/* ⑦ 중복 제거 */}
-    <Section title="⑦ 중복 행 제거" desc="선택 컬럼 기준으로 중복 제거">
+    {/* ⑧ 중복 제거 */}
+    <Section title="⑧ 중복 행 제거" desc="선택 컬럼 기준으로 중복 제거">
       <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>{ds.columns.filter(c=>!dropCols.includes(c)).map(c=><span key={c} onClick={()=>toggleDedup(c)} style={{fontSize:12,padding:"4px 10px",borderRadius:10,cursor:"pointer",background:dedupCols.includes(c)?"#E1F5EE":C.bg,color:dedupCols.includes(c)?"#085041":C.txS,border:`0.5px solid ${dedupCols.includes(c)?"#0F6E56":C.bd}`,fontFamily:"var(--font-mono)",fontWeight:dedupCols.includes(c)?500:400}}>{c}</span>)}</div>
       <Btn variant="success" onClick={()=>applyDedup(getTargets())} disabled={!dedupCols.length} small>{applyAll_?"전체 파일 적용":"이 파일 적용"}</Btn>
     </Section>

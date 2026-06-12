@@ -15,7 +15,7 @@ export function StartRowPanel({ datasets, onUpdate }) {
   if (!adjustable.length) return null;
   const previewDs = adjustable.find(d => d.id === previewId) || adjustable[0];
   const grid = previewDs.rawGrid || [];
-  const previewRows = grid.slice(0, 8);
+  const previewRows = grid.slice(0, Math.min(grid.length, Math.max(8, headerRow + 2)));
   const maxCols = Math.min(8, Math.max(...previewRows.map(r => r.length), 1));
 
   const applyAll = () => {
@@ -134,6 +134,7 @@ export function MergePanel({ datasets, onResult }) {
   const [lKey, setLKey] = useState("");
   const [rKey, setRKey] = useState("");
   const [jType, setJType] = useState("inner");
+  const [removeSrc, setRemoveSrc] = useState(false);
 
   const JOIN = [
     { id:"inner", label:"Inner", desc:"양쪽 모두" },
@@ -145,7 +146,10 @@ export function MergePanel({ datasets, onResult }) {
   const handle = () => {
     if (!lKey || !rKey) return alert("조인 키를 선택해 주세요.");
     if (lIdx === rIdx) return alert("서로 다른 파일을 선택해 주세요.");
-    onResult(performJoin(datasets[lIdx], datasets[rIdx], lKey, rKey, jType));
+    onResult(
+      performJoin(datasets[lIdx], datasets[rIdx], lKey, rKey, jType),
+      removeSrc ? [datasets[lIdx].id, datasets[rIdx].id] : []
+    );
   };
 
   const sel = (idx, setIdx, key, setKey, label) => (
@@ -190,7 +194,13 @@ export function MergePanel({ datasets, onResult }) {
             </div>
           ))}
         </div>
-        <Btn variant="primary" onClick={handle}>Merge 실행</Btn>
+        <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
+          <Btn variant="primary" onClick={handle}>Merge 실행</Btn>
+          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.txS, cursor:"pointer" }}>
+            <input type="checkbox" checked={removeSrc} onChange={e => setRemoveSrc(e.target.checked)}/>
+            실행 후 원본 2개 파일 제거 (결과만 남기기)
+          </label>
+        </div>
       </div>
     </div>
   );
@@ -199,6 +209,7 @@ export function MergePanel({ datasets, onResult }) {
 export function UnionPanel({ datasets, onResult }) {
   const [sel, setSel] = useState(() => new Set(datasets.map((_, i) => i)));
   const [mode, setMode] = useState("outer");
+  const [removeSrc, setRemoveSrc] = useState(false);
 
   const toggle = i => setSel(p => {
     const s = new Set(p);
@@ -248,10 +259,19 @@ export function UnionPanel({ datasets, onResult }) {
             </div>
           ))}
         </div>
-        <Btn variant="success" disabled={sel.size < 2}
-          onClick={() => { if (selDs.length < 2) return alert("2개 이상 선택"); onResult(performUnion(selDs, mode)); }}>
-          Union 실행
-        </Btn>
+        <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
+          <Btn variant="success" disabled={sel.size < 2}
+            onClick={() => {
+              if (selDs.length < 2) return alert("2개 이상 선택");
+              onResult(performUnion(selDs, mode), removeSrc ? selDs.map(d => d.id) : []);
+            }}>
+            Union 실행
+          </Btn>
+          <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.txS, cursor:"pointer" }}>
+            <input type="checkbox" checked={removeSrc} onChange={e => setRemoveSrc(e.target.checked)}/>
+            실행 후 원본 {selDs.length}개 파일 제거 (결과만 남기기)
+          </label>
+        </div>
       </div>
     </div>
   );
