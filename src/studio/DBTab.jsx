@@ -218,7 +218,7 @@ function MdBlock({ text }) {
   );
 }
 
-export function DBTab({ allDs }) {
+export function DBTab({ allDs, onAddDataset }) {
   const [sqlReady, setSqlReady]       = useState(false);
   const [sqlError, setSqlError]       = useState("");
   const dbRef                          = useRef(null);
@@ -648,11 +648,21 @@ ${sampleRows}
                 <span style={{ fontSize:12, fontWeight:600, color:"var(--color-text-success)" }}>
                   ✅ 결과 — {results.rows.length.toLocaleString()}행 × {results.columns.length}열
                 </span>
-                {apiKey && (
-                  <Btn small variant="primary" onClick={interpretResult} disabled={aiLoading}>
-                    {aiLoading ? "AI 분석 중…" : "🤖 AI 해석"}
-                  </Btn>
-                )}
+                <div style={{ display:"flex", gap:6 }}>
+                  {onAddDataset && resultDs && (
+                    <Btn small variant="success" onClick={() => {
+                      const name = `sql_${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}).replace(/:/g,"")}`;
+                      onAddDataset({ ...resultDs, id: crypto.randomUUID(), name });
+                    }}>
+                      📥 새 데이터로 저장
+                    </Btn>
+                  )}
+                  {apiKey && (
+                    <Btn small variant="primary" onClick={interpretResult} disabled={aiLoading}>
+                      {aiLoading ? "AI 분석 중…" : "🤖 AI 해석"}
+                    </Btn>
+                  )}
+                </div>
               </div>
               <div style={{ padding:12 }}>
                 <DataTable rows={results.rows} columns={results.columns} maxH={400} />

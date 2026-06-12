@@ -366,7 +366,7 @@ export default function DataStudioApp({ onBack = null }) {
       {activeTab === "info"    && hasData && <DataInfoTab datasets={allDs} onUpdate={handleUpdate} />}
       {activeTab === "summary" && hasData && <SummaryTab  datasets={allDs} onResult={r => setSummaryResults(p => [...p, r])} />}
       {activeTab === "prep"    && hasData && <PreprocessTab datasets={datasets} onUpdate={d => setDatasets(p => p.map(x => x.id === d.id ? d : x))} />}
-      {activeTab === "db"      && hasData && <DBTab   allDs={allDs} />}
+      {activeTab === "db"      && hasData && <DBTab   allDs={allDs} onAddDataset={ds => { setDatasets(p => [...p, ds]); changeTab("files"); }} />}
       {activeTab === "viz"     && hasData && <VizTab  allDs={allDs} />}
       {activeTab === "eda"     && hasData && <EDATab  allDs={allDs} summaryResults={summaryResults} />}
       {activeTab === "ml"      && hasData && <MLTab   allDs={allDs} apiKey={sessionStorage.getItem("openrouter_key") || ""} />}
