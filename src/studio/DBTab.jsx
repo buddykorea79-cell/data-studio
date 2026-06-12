@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { C } from "../constants";
 import { Btn, DsSelector, DataTable } from "./UI";
-import { makeDataset } from "../utils/dataUtils";
+import { makeDataset, downloadCSV } from "../utils/dataUtils";
 import { ChartCard, HistChart, CorrHeatmap, getNumCols, XYChart } from "./Charts";
 
 const MODELS = [
@@ -265,6 +265,31 @@ export function DBTab({ allDs, onAddDataset }) {
   };
 
   // ── Import dataset ───────────────────────────────────────────────────────────
+  // ds → SQLite 테이블 생성 (공통 헬퍼)
+  const loadDsIntoTable = (ds, name) => {
+    const db = dbRef.current;
+    const cols = ds.columns.map(col => {
+      const t = ds.colMeta.find(m => m.name === col)?.type;
+      return `"${col.replace(/"/g, '""')}" ${t === "number" ? "REAL" : "TEXT"}`;
+    }).join(", ");
+
+    db.run(`DROP TABLE IF EXISTS "${name}"`);
+    db.run(`CREATE TABLE "${name}" (${cols})`);
+
+    const placeholders = ds.columns.map(() => "?").join(",");
+    const stmt = db.prepare(`INSERT INTO "${name}" VALUES (${placeholders})`);
+    for (const row of ds.rows) {
+      stmt.run(ds.columns.map(col => {
+        const v = row[col];
+        if (v === null || v === undefined || v === "") return null;
+        const t = ds.colMeta.find(m => m.name === col)?.type;
+        return t === "number" ? (isNaN(parseFloat(v)) ? null : parseFloat(v)) : String(v);
+      }));
+    }
+    stmt.free();
+    refreshTables();
+  };
+
   const importTable = () => {
     const db = dbRef.current;
     const ds = allDs.find(d => d.id === selDsId);
@@ -278,26 +303,7 @@ export function DBTab({ allDs, onAddDataset }) {
 
     setImporting(true); setError(""); setImportMsg("");
     try {
-      const cols = ds.columns.map(col => {
-        const t = ds.colMeta.find(m => m.name === col)?.type;
-        return `"${col.replace(/"/g, '""')}" ${t === "number" ? "REAL" : "TEXT"}`;
-      }).join(", ");
-
-      db.run(`DROP TABLE IF EXISTS "${name}"`);
-      db.run(`CREATE TABLE "${name}" (${cols})`);
-
-      const placeholders = ds.columns.map(() => "?").join(",");
-      const stmt = db.prepare(`INSERT INTO "${name}" VALUES (${placeholders})`);
-      for (const row of ds.rows) {
-        stmt.run(ds.columns.map(col => {
-          const v = row[col];
-          if (v === null || v === undefined || v === "") return null;
-          const t = ds.colMeta.find(m => m.name === col)?.type;
-          return t === "number" ? (isNaN(parseFloat(v)) ? null : parseFloat(v)) : String(v);
-        }));
-      }
-      stmt.free();
-      refreshTables();
+      loadDsIntoTable(ds, name);
       setImportMsg(`✅ "${name}" 테이블 생성 완료 (${ds.rowCount.toLocaleString()}행)`);
       setTblName("");
       setActiveTab("query");
@@ -305,6 +311,20 @@ export function DBTab({ allDs, onAddDataset }) {
       setError(`가져오기 실패: ${e.message}`);
     } finally {
       setImporting(false);
+    }
+  };
+
+  // SQL 결과를 테이블로 저장 → 결과에 대해 다시 쿼리 가능
+  const saveResultAsTable = () => {
+    if (!resultDs) return;
+    const ts = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/:/g, "");
+    const name = `sql_result_${ts}`;
+    setError("");
+    try {
+      loadDsIntoTable(resultDs, name);
+      setImportMsg(`✅ "${name}" 테이블 생성 완료 — 이 테이블에 다시 쿼리할 수 있습니다 (${resultDs.rowCount.toLocaleString()}행)`);
+    } catch (e) {
+      setError(`테이블 저장 실패: ${e.message}`);
     }
   };
 
@@ -648,13 +668,23 @@ ${sampleRows}
                 <span style={{ fontSize:12, fontWeight:600, color:"var(--color-text-success)" }}>
                   ✅ 결과 — {results.rows.length.toLocaleString()}행 × {results.columns.length}열
                 </span>
-                <div style={{ display:"flex", gap:6 }}>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {resultDs && (
+                    <Btn small onClick={saveResultAsTable}>
+                      🗄️ 테이블로 저장 (재쿼리)
+                    </Btn>
+                  )}
                   {onAddDataset && resultDs && (
                     <Btn small variant="success" onClick={() => {
-                      const name = `sql_${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}).replace(/:/g,"")}`;
+                      const name = `sql_${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).replace(/:/g,"")}`;
                       onAddDataset({ ...resultDs, id: crypto.randomUUID(), name });
                     }}>
                       📥 새 데이터로 저장
+                    </Btn>
+                  )}
+                  {resultDs && (
+                    <Btn small onClick={() => downloadCSV(resultDs)}>
+                      ⬇ CSV
                     </Btn>
                   )}
                   {apiKey && (
