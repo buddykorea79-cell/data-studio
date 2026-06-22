@@ -1,0 +1,1 @@
+export default function RagAnswerPanel({ answer }: { answer: string }) { return <section aria-live="polite" className="rag-card"><h2>RAG 답변</h2><pre className="rag-answer">{answer || "추천 혜택, 추천 근거, 추가 확인 조건, 신청 방법, 필요서류, 쉬운 말 안내, 검색 근거, 공식 확인 안내가 여기에 표시됩니다."}</pre></section>; }

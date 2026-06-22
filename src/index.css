@@ -210,3 +210,22 @@ body {
     --color-primary-300: #3F3F46;
   }
 }
+
+.rag-page { min-height: 100vh; background: var(--color-background-secondary); color: var(--color-text-primary); font-family: var(--font-sans); font-size: 16px; line-height: 1.5; }
+.rag-skip { position: absolute; left: 12px; top: -40px; background: var(--color-brand); color: white; padding: 8px 12px; border-radius: 8px; z-index: 100; }
+.rag-skip:focus { top: 12px; }
+.rag-header { background: var(--color-background-primary); border-bottom: 1px solid var(--color-border-tertiary); padding: 24px max(16px, calc((100vw - 960px) / 2)); }
+.rag-header h1 { font-size: clamp(28px, 7vw, 44px); margin: 16px 0 8px; }
+.rag-header p { color: var(--color-text-secondary); }
+.rag-page main { width: min(960px, 100%); margin: 0 auto; padding: 16px 16px 64px; display: grid; gap: 16px; }
+.rag-card { background: var(--color-background-primary); border: 1px solid var(--color-border-tertiary); border-radius: 16px; padding: 20px; box-shadow: var(--shadow-xs); display: grid; gap: 14px; }
+.rag-card h2 { font-size: 20px; }
+.rag-card label { display: grid; gap: 6px; font-weight: 700; }
+.rag-card input, .rag-card textarea { width: 100%; min-height: 44px; border: 1px solid var(--color-border-secondary); border-radius: 10px; padding: 10px 12px; font: inherit; color: var(--color-text-primary); background: var(--color-background-primary); }
+.rag-card textarea { min-height: 130px; resize: vertical; }
+.rag-card button, .rag-header button { border: 1px solid var(--color-brand); border-radius: 10px; background: var(--color-brand); color: white; min-height: 44px; padding: 10px 14px; font: inherit; font-weight: 700; cursor: pointer; }
+.rag-card button:disabled { opacity: .55; cursor: not-allowed; }
+.rag-notice { background: var(--color-brand-soft); color: var(--color-brand-strong); }
+.rag-answer { white-space: pre-wrap; font: inherit; line-height: 1.6; }
+.rag-card ol { padding-left: 20px; display: grid; gap: 12px; }
+.rag-card li p { margin-top: 6px; color: var(--color-text-secondary); }

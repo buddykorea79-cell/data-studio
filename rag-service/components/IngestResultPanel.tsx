@@ -1,0 +1,1 @@
+export default function IngestResultPanel({ result }: { result: string }) { return <section aria-live="polite" className="rag-card"><h2>처리 결과</h2><p>{result || "테이블 생성, 파일 분석, 벡터 DB 생성 결과가 표시됩니다."}</p></section>; }
