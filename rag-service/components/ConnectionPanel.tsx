@@ -1,0 +1,5 @@
+import type { ConnectionInfo } from "../types/rag";
+export default function ConnectionPanel({ value, onChange, onSetup }: { value: ConnectionInfo; onChange: (next: ConnectionInfo) => void; onSetup: () => void }) {
+  const set = (key: keyof ConnectionInfo, next: string) => onChange({ ...value, [key]: next });
+  return <section className="rag-card"><h2>1단계 연결 정보 입력</h2><label>Supabase Postgres Connection String<input type="password" value={value.databaseUrl} onChange={(e) => set("databaseUrl", e.target.value)} autoComplete="off" /></label><label>OpenAI API Key<input type="password" value={value.openaiApiKey} onChange={(e) => set("openaiApiKey", e.target.value)} autoComplete="off" /></label><label>Embedding Model<input value={value.embeddingModel} onChange={(e) => set("embeddingModel", e.target.value)} /></label><label>Table Prefix<input value={value.tablePrefix} onChange={(e) => set("tablePrefix", e.target.value)} /></label><div className="rag-notice">🔐 입력한 연결 정보는 저장하지 않고 요청 처리에만 사용합니다. 공개 배포 환경에서는 관리자 전용으로 보호해야 합니다.</div><h2>2단계 테이블 생성</h2><button type="button" onClick={onSetup}>테이블 생성 실행</button></section>;
+}

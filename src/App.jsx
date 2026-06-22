@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import DataStudioApp from "./studio/Studio";
+import RagChallengePage from "../rag-service/components/RagChallengePage";
 
 // ── 앱 카탈로그 ───────────────────────────────────────────────────────────────
 const APPS = [
@@ -27,15 +28,17 @@ const APPS = [
     color: "#3E63DD",
   },
   {
-    id: "lifepeople",
-    status: "wip",
-    icon: "🗺️",
-    label: "생활인구 분석",
-    category: "지역 분석",
-    tagline: "서울시 유동인구 탐색기",
-    desc: "서울시 생활인구 공공데이터를 시간대·연령대·행정동별로 탐색합니다.",
-    tags: ["공공데이터", "지도", "유동인구"],
+    id: "rag-challenge",
+    status: "live",
+    placement: "wip",
+    icon: "🧩",
+    label: "RAG 도전하기",
+    category: "AI 실습",
+    tagline: "복지서비스 벡터 DB 실습",
+    desc: "복지서비스 파일을 Supabase 벡터 DB로 변환하고, 자연어 또는 복지 조건으로 검색해 보는 실습 서비스입니다.",
+    tags: ["RAG", "Supabase", "복지검색"],
     color: "#30A46C",
+    path: "/rag-challenge",
   },
   {
     id: "migration",
@@ -66,7 +69,10 @@ function AppCard({ app, onSelect }) {
   const handle = () => {
     if (!live) return;
     if (app.href) window.open(app.href, "_blank", "noopener,noreferrer");
-    else onSelect(app.id);
+    else if (app.path) {
+      window.history.pushState(null, "", app.path);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } else onSelect(app.id);
   };
 
   return (
@@ -109,7 +115,7 @@ function AppCard({ app, onSelect }) {
             background: "var(--color-background-tertiary)", color: "var(--color-text-tertiary)",
           }}>준비 중</span>
         )}
-        {app.href && (
+        {(app.href || app.path) && (
           <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>↗</span>
         )}
       </div>
@@ -168,8 +174,8 @@ function AppCard({ app, onSelect }) {
 
 // ── 홈 화면 ───────────────────────────────────────────────────────────────────
 function HomeScreen({ onSelect }) {
-  const liveApps = APPS.filter(a => a.status === "live");
-  const wipApps  = APPS.filter(a => a.status === "wip");
+  const liveApps = APPS.filter(a => a.status === "live" && a.placement !== "wip");
+  const wipApps  = APPS.filter(a => a.status === "wip" || a.placement === "wip");
 
   return (
     <div style={{
@@ -383,19 +389,34 @@ function HomeScreen({ onSelect }) {
 
 // ── 메인 App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const [path, setPath] = useState(() => window.location.pathname);
   const [currentApp, setCurrentApp] = useState(() => {
     try { return sessionStorage.getItem(SESSION_KEY) || null; } catch { return null; }
   });
 
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const goHome = useCallback(() => {
-    try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+    window.history.pushState(null, "", "/");
+    setPath("/");
+    try { sessionStorage.removeItem(SESSION_KEY); } catch {
+      // sessionStorage may be unavailable in private browsing.
+    }
     setCurrentApp(null);
   }, []);
 
   const goApp = useCallback((id) => {
-    try { sessionStorage.setItem(SESSION_KEY, id); } catch {}
+    try { sessionStorage.setItem(SESSION_KEY, id); } catch {
+      // sessionStorage may be unavailable in private browsing.
+    }
     setCurrentApp(id);
   }, []);
+
+  if (path === "/rag-challenge") return <RagChallengePage />;
 
   return (
     <div>
