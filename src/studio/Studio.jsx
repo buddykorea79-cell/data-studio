@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 
-export const APP_VERSION = "v0.22";
-export const APP_BUILD   = "2026-06-12";
+export const APP_VERSION = "v0.23";
+export const APP_BUILD   = "2026-08-07";
 import { C } from "../constants";
 import { parseFile, makeDataset } from "../utils/dataUtils";
 import { FileCard }          from "./FileCard";
